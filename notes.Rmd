@@ -1,0 +1,123 @@
+---
+title: "notes"
+author: "Kunlei He"
+date: "2024-02-17"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    toc_collapse: true
+    number_sections: true
+    df_print: paged
+    theme: lumen
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Condition Check
+- episode 117
+  - 3453, human was given, should be interactive
+  - 3684, interactive was given, should be semi
+  - 3687, interactive was given, should be human
+  - 3719, no was given, should be interactive
+  
+- episode 109
+  - 3469, human was given, should be no
+  - 3260, interactive was given, should be semi
+
+- episode 101
+  - 3469, no was given, should be human
+
+# ID alignment, duplicated rows
+## Episode 117 post and delayed
+- 107 post: 
+  - id 3441, no name in tracker, but completed 117 post: **check with Kelsy --> change id to 3453 for post 117**
+  - [dup] 3368, 3718 with later dates should be moved to df_Delayed117
+- 107 delayed: 
+  - [dup] 3411 Samantha should be removed, no values
+  - [dup] 3425 KH should be 3426
+  - [dup] 3430 and 3278 with earlier dates should be moved to df_Post117
+
+## Episode 109 post and delayed
+- 109 post: 
+  - id 3395 3397 3398 3399 3396 3403, completed 109 post, but not in tracker. their start dates were 2022-11-01, 2022-11-03, 2022-11-08. **Was this before the shut down? Yes**
+  - [dup] 3425 KH should be 3426
+  - [dup] 3437 and 3278 with later dates should be moved to df_Delayed109
+  
+- 109 deplayed: id 3348 3717, in the tracker, but not completed 109 delayed
+  - id 3348 dropped from the study after 117
+  - id 3717 did not give delayed bc previous session did not administer post test (technical difficulties)
+
+## Episode 101 post
+- id "3397" "3395" "3399" "3398" "3396" "3400" "3392" "3388" "3382" "3389" "3403" "3390" "3398" "3399" "3356" "3396" "3401" "3334" "3362" "3358" "3402", completed 101 post, but not in the tracker. Their session 1 started in 2022/11 **Was this before the shut down? Yes**
+- [dup] 3399, 3398, 3396 have dups and both rows should be removed
+- [dup] 3289 and 3681 with earlier time should be removed
+
+# Quils
+Duplicated rows:
+
+- "3321" "3321" "3335" "3335" "3342" "3342" "3344" "3344" "3394" "3718" "0"    "0"    "3394" "3718" -- keep those with later dates. Earlier dates were done before the shutdown
+
+# Naming convention for post test
+- episode number
+- type of test (post, delayed)
+- question number
+- level (initial, reprompt, na)
+- type (choice, text, constructed response [cr])
+
+Examples: 
+
+- 109_post_q1_init_choice
+- 109_post_q1_init_text
+- 109_delayed_q1_rpt_choice
+- 109_delayed_q1_rpt_text
+- 109_delayed_10a_cr
+
+Notes:
+
+- Post 101, q12-q14 are vocab items
+
+# Post-test Scoring
+## Episode 117 post and delayed 
+Scores:
+
+- Full score for non CR items: 26 points
+
+Notes:
+
+- q2: probably needs human review. As long as they mention one of the three great things, considered correct.
+- q9: do kids have to use "molt" in order to be correct at the initial level? (yes for prelim analysis) - No, conceptually
+- q13: is "tight" or "small" correct for initial level (no for prelim analysis): Yes
+- q14: is "woods" "jungle" "grass" correct? (yes for prelim analysis based on last round criteria, inconsistency across RAs)
+
+## Episode 109 post and delayed 
+Scores
+
+- Full score for non CR items: 14 points
+
+Notes:
+
+- q9: probably needs human review (for prelim analysis, only used category)
+
+## Episode 101 post
+Scores:
+
+- Full score for non CR items: 22 points
+- Full score for vocab items: 8 points
+
+Notes:
+
+- Synonyms considered correct for goopy? thick, gooey, slimy, sticky, slow?
+  - q4: is slimy, gooey or *slow* correct? (slimy and gooey considered correct for prelim analysis, not slow) 
+  - q6: ketchup + synonyms of goopy
+  - q7: same as above
+
+# Baseline
+## TOM
+- Rubrics: The 4-point scale was coded as No (0), Yes-a little bit (1), Yes-medium amount (2), and Yes-a lot (3)

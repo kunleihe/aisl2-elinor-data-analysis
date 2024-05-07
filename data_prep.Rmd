@@ -1,0 +1,1061 @@
+---
+title: "AISL2_EWW_data_prep"
+author: "Kunlei He"
+date: "2024-02-17"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    toc_collapse: true
+    number_sections: true
+    df_print: paged
+    theme: lumen
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+```
+
+# Load library
+```{r}
+library(openxlsx)
+library(dplyr)
+library(lme4)
+library(ggplot2)
+library(tidyr)
+```
+
+# Load data
+```{r}
+df_RawTracker = read.xlsx("raw_data/raw_tracker.xlsx")
+
+df_QuilsPt1 = read.csv("raw_data/raw_quils_pt1.csv")
+df_QuilsPt2 = read.csv("raw_data/raw_quils_pt2.csv")
+
+df_RawPost117 = read.csv("raw_data/raw_post_117.csv")
+df_RawPost109 = read.csv("raw_data/raw_post_109.csv")
+df_RawPost101 = read.csv("raw_data/raw_post_101.csv")
+
+
+df_RawDelayed117 = read.csv("raw_data/raw_delayed_post_117.csv")
+df_RawDelayed109 = read.csv("raw_data/raw_delayed_post_109.csv")
+```
+
+# Clean data
+## Tracker
+```{r}
+# remove the first row
+names(df_RawTracker) = as.character(unlist(df_RawTracker[1, ]))  # Set the first row as names
+df_RawTracker = df_RawTracker[-1, ]  # Remove the first row from the data
+
+# only keep useful columnns
+cols = c("id", "condition", "dob", "gender", "ethnicity", "race", "condition117","ep117_posttest_date", "ep117_notes", "condition109", "ep109_posttest_date","ep109_notes", "condition101", "ep101_posttest_date", "ep101_notes")
+df_Tracker = df_RawTracker[, cols]
+
+# convert dates
+dateCols = c("dob","ep117_posttest_date", "ep109_posttest_date", "ep101_posttest_date")
+df_Tracker[dateCols] = lapply(df_Tracker[dateCols], function(x) as.Date(as.numeric(x), origin = "1899-12-30"))
+
+# remove id if child did zero sessions
+df_Tracker = df_Tracker %>%  filter(!is.na(ep117_posttest_date) | !is.na(ep109_posttest_date) | !is.na(ep101_posttest_date))
+
+# rename condition as CA
+df_Tracker <- df_Tracker %>%
+  rename(CA = condition)
+
+# check the range of ids for future use
+print(range(df_Tracker$id))
+```
+### check dup rows
+```{r}
+dupRows <- df_Tracker %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows)
+```
+
+### fix conditions
+```{r}
+# For id = 3453, change condition117 to "human"
+df_Tracker$condition117[df_Tracker$id == "3453"] = "human"
+
+# For id = 3864 and id = 3687, change condition117 to "interactive"
+df_Tracker$condition117[df_Tracker$id == "3684"] = "interactive"
+df_Tracker$condition117[df_Tracker$id == "3687"] = "interactive"
+
+# For id = 3719, change condition 117 to "no
+df_Tracker$condition117[df_Tracker$id == "3719"] = "interactive"
+
+# For id = 3469, change condition109 to "human"
+df_Tracker$condition109[df_Tracker$id == "3469"] = "human"
+
+# For id = 3260, change condition109 to "interactive"
+df_Tracker$condition109[df_Tracker$id == "3260"] = "interactive"
+
+# For id = 3469, change condition101 to "no"
+df_Tracker$condition101[df_Tracker$id == "3469"] = "no"
+
+
+
+```
+
+### clean age and ethnicity
+```{r}
+# age
+# Ensure both dob and ep117_posttest_date are in Date format
+df_Tracker$dob = as.Date(df_Tracker$dob)
+df_Tracker$ep117_posttest_date = as.Date(df_Tracker$ep117_posttest_date)
+
+# Calculate age 
+df_Tracker$age = as.numeric(df_Tracker$ep117_posttest_date - df_Tracker$dob)/365.25
+
+# Optionally, you might want to round the age to a reasonable number of decimal places
+df_Tracker$age <- round(df_Tracker$age, 2)
+
+# rearrange
+df_Tracker = df_Tracker %>% dplyr::select(id, age, gender, ethnicity, everything())
+
+# ethnicity
+table(df_Tracker$ethnicity)
+df_Tracker$ethnicity = ifelse(is.na(df_Tracker$ethnicity), NA, 
+                              ifelse(grepl("not", df_Tracker$ethnicity), "notHispanic", "hispanic"))
+```
+## Quils
+### check dup rows
+```{r}
+# row bind quils pt1 and pt2
+df_Quils = rbind(df_QuilsPt1, df_QuilsPt2)
+# rename id
+df_Quils = df_Quils %>% rename(id = Student.ID)
+
+# check dup rows
+dupRows <- df_Quils %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows)
+
+```
+### remove dup rows
+```{r}
+df_Quils$First.Access <- as.POSIXct(df_Quils$First.Access, format="%m/%d/%Y %H:%M", tz="UTC")
+
+
+# Sort by 'id' and 'First.Access' in descending order within each 'id', then keep the last occurrence
+df_Quils <- df_Quils %>%
+  arrange(id, First.Access) %>%
+  filter(!duplicated(id, fromLast = TRUE))
+
+# check dup rows again
+dupRows <- df_Quils %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows)
+
+```
+
+### score
+```{r}
+correctAnswers = c(1,3,2,2,1, #q1-q5
+                      1,3,3,1, # q6-q9
+                      2,3,3,1, # q10-q13
+                      3,1,3, # q14-q16
+                      2,1, # q17-q18
+                      4,2,1,3, # q19-q22
+                      4,3,1, # q23-q25
+                      3,1,2,1,1, # q26-q30
+                      4,3, # q31
+                      2,3, # q32
+                      4,1, # q33
+                      2,4, # q34
+                      3,2, # q35
+                      2,2,3,1,3, # q36-q40
+                      2,1, # q41
+                      1,2, # q42
+                      3,3, # q43
+                      1,3, # q44
+                      2,3, # q45
+                      2,3,1 # q46-q48
+                      ) 
+
+# calculate scores by item
+for(i in 1:length(correctAnswers)){
+  questionColName = colnames(df_Quils)[12 + i] # Adjusting index to match question columns
+  scoreColName <- paste0(questionColName, "_score")
+  df_Quils[[scoreColName]] <- ifelse(df_Quils[[questionColName]] == correctAnswers[i], 1, 0)
+}
+
+# calcualte sum score
+scoreCols <- grep("_score$", names(df_Quils), value = TRUE)
+df_Quils$eng_prof <- rowSums(df_Quils[, scoreCols], na.rm = TRUE)
+
+
+# merge to tracker
+df_Tracker = merge(df_Tracker, df_Quils[, c("id", "eng_prof")], by=c("id"), all.x=T)
+
+# rearrange
+df_Tracker = df_Tracker %>% dplyr::select(id, age, gender, ethnicity, eng_prof, everything())
+
+# check dup rows
+dupRows <- df_Tracker %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows)
+```
+
+
+## Episode 117 post and delayed
+Post 117
+```{r}
+# remove unuseful columns
+df_Post117 = df_RawPost117[, -c(2:17)]
+
+# remove first two rows
+df_Post117 = df_Post117[-c(1:2), ]
+
+# get the id. Notice the id and ra names are mixed in some cases
+df_Post117$id = ifelse(df_Post117$Intro_4 %in% c(3000:4000), df_Post117$Intro_4, df_Post117$Intro_5)
+# get the ra initials
+df_Post117$ra = ifelse(is.na(as.numeric(as.character(df_Post117$Intro_4))), df_Post117$Intro_4, df_Post117$Intro_5)
+# get rid of intro_4 and intro_5
+df_Post117 = df_Post117 %>% dplyr::select(-Intro_4, -Intro_5)
+# rearrange columns
+df_Post117 = df_Post117 %>% dplyr::select(id, ra, everything())
+
+# remove testing ids
+df_Post117 = df_Post117 %>%  filter(id %in% c(3000:4000))
+
+# find elements in df_Post117$id that are NOT present in df_Tracker$id
+diffID = df_Post117$id[!df_Post117$id %in% df_Tracker$id]
+print(diffID) # check with Kelsy (see notes.md)
+```
+
+Delayed 117
+```{r}
+# remove unuseful columns
+df_Delayed117 = df_RawDelayed117[, -c(2:17)]
+
+# remove first two rows
+df_Delayed117 = df_Delayed117[-c(1:2), ]
+
+# get the id. Notice the id and ra names are mixed in some cases
+df_Delayed117$id = ifelse(df_Delayed117$Intro_4 %in% c(3000:4000), df_Delayed117$Intro_4, df_Delayed117$Intro_5)
+# get the ra initials
+df_Delayed117$ra = ifelse(is.na(as.numeric(as.character(df_Delayed117$Intro_4))), df_Delayed117$Intro_4, df_Delayed117$Intro_5)
+# get rid of intro_4 and intro_5
+df_Delayed117 = df_Delayed117 %>% dplyr::select(-Intro_4, -Intro_5)
+# rearrange columns
+df_Delayed117 = df_Delayed117 %>% dplyr::select(id, ra, everything())
+
+# remove testing ids
+df_Delayed117 = df_Delayed117 %>%  filter(id %in% c(3000:4000))
+
+# find elements in df_Post117$id that are NOT present in df_Tracker$id
+diffID = as.numeric(df_Delayed117$id[!df_Delayed117$id %in% df_Tracker$id])
+print(diffID) 
+```
+
+## Episode 109 post and delayed
+post
+```{r}
+# remove unuseful columns
+df_Post109 = df_RawPost109[, -c(2:17)]
+
+
+# remove first two rows
+df_Post109 = df_Post109[-c(1:2), ]
+
+# get the id. Notice the id and ra names are mixed in some cases
+df_Post109$id = ifelse(df_Post109$Intro_4 %in% c(3000:4000), df_Post109$Intro_4, df_Post109$Intro_5)
+# get the ra initials
+df_Post109$ra = ifelse(is.na(as.numeric(as.character(df_Post109$Intro_4))), df_Post109$Intro_4, df_Post109$Intro_5)
+# get rid of intro_4 and intro_5
+df_Post109 = df_Post109 %>% dplyr::select(-Intro_4, -Intro_5)
+# rearrange columns
+df_Post109 = df_Post109 %>% dplyr::select(id, ra, everything())
+
+# remove testing ids
+df_Post109 = df_Post109 %>%  filter(id %in% c(3000:4000))
+
+# find elements in df_Post109$id that are NOT present in df_Tracker$id
+diffID = as.numeric(df_Post109$id[!df_Post109$id %in% df_Tracker$id])
+print(diffID) 
+
+# check if they were before the shutdown
+print(df_Post109[df_Post109$id %in% diffID, ])
+```
+Delayed
+```{r}
+# remove unuseful columns
+df_Delayed109 = df_RawDelayed109[, -c(2:17)]
+
+# remove first two rows
+df_Delayed109 = df_Delayed109[-c(1:2), ]
+
+# get the id. Notice the id and ra names are mixed in some cases
+df_Delayed109$id = ifelse(df_Delayed109$Intro_4 %in% c(3000:4000), df_Delayed109$Intro_4, df_Delayed109$Intro_5)
+# get the ra initials
+df_Delayed109$ra = ifelse(is.na(as.numeric(as.character(df_Delayed109$Intro_4))), df_Delayed109$Intro_4, df_Delayed109$Intro_5)
+# get rid of intro_4 and intro_5
+df_Delayed109 = df_Delayed109 %>% dplyr::select(-Intro_4, -Intro_5)
+# rearrange columns
+df_Delayed109 = df_Delayed109 %>% dplyr::select(id, ra, everything())
+
+# remove testing ids
+df_Delayed109 = df_Delayed109 %>%  filter(id %in% c(3000:4000))
+
+# find elements in df_Tracker$id that are NOT present in df_Post109$id
+diffID = as.numeric(df_Tracker$id[!df_Tracker$id %in% df_Delayed109$id])
+print(diffID) 
+# check the tracker
+print(df_RawTracker[df_RawTracker$id %in% diffID, ])
+```
+
+## Episode 101 post 
+post
+```{r}
+# remove unuseful columns
+df_Post101 = df_RawPost101[, -c(2:17)]
+
+# remove first two rows
+df_Post101 = df_Post101[-c(1:2), ]
+
+# get the id. Notice the id and ra names are mixed in some cases
+df_Post101$id = ifelse(df_Post101$Intro_4 %in% c(3000:4000), df_Post101$Intro_4, df_Post101$Intro_5)
+# get the ra initials
+df_Post101$ra = ifelse(is.na(as.numeric(as.character(df_Post101$Intro_4))), df_Post101$Intro_4, df_Post101$Intro_5)
+# get rid of intro_4 and intro_5
+df_Post101 = df_Post101 %>% dplyr::select(-Intro_4, -Intro_5)
+# rearrange columns
+df_Post101 = df_Post101 %>% dplyr::select(id, ra, everything())
+
+# remove testing ids
+df_Post101 = df_Post101 %>%  filter(id %in% c(3000:4000))
+
+# find elements in df_Post101$id that are NOT present in df_Tracker$id
+diffID = df_Post101$id[!df_Post101$id %in% df_Tracker$id]
+print(diffID) # check with Kelsy (see notes.md)
+```
+
+# Rename, check dup, and  score data
+1. Rename and score post and delayed since they share same columns
+2. Check dup rows
+3. Rename colnames again to specify post and delayed by adding prefix
+
+## Episode 117 post and delayed
+Rename
+```{r}
+# print(colnames(df_Post117))
+# print(head(df_Post117))
+
+# set up colume names for 117
+colNames117 = c("id", "ra", "start_date", 
+                "q1_init_choice", "q1_init_text", "q1_rpt_choice", "q1_rpt_text",
+                "q2_init_choice", "q2_init_text", "q2_rpt_choice", "q2_rpt_text",
+                "q3_init_choice", "q3_init_text", "q3_rpt_choice", "q3_rpt_text",
+                "q4_cr",
+                "q5a_init_choice", "q5a_init_text", "q5b_init_choice", "q5b_init_text",
+                "q6_init_choice", "q6_init_text", "q6_rpt_choice", "q6_rpt_text",
+                "q7_init_choice", "q7_init_text", "q7_rpt_choice", "q7_rpt_text",
+                "q8_init_choice", "q8_init_text", "q8_rpt_choice", "q8_rpt_text",
+                "q9_init_choice", "q9_init_text", "q9_rpt_choice", "q9_rpt_text",
+                "q10_init_choice", "q10_init_text", "q10_rpt_choice", "q10_rpt_text",
+                "q11_init_choice", "q11_init_text", "q11_rpt_choice", "q11_rpt_text",
+                "q12_init_choice", "q12_init_text", "q12_rpt_choice", "q12_rpt_text",
+                "q13_init_choice", "q13_init_text", "q13_rpt_choice", "q13_rpt_text",
+                "q14_init_choice", "q14_init_text", "q14_rpt_choice", "q14_rpt_text",
+                "q15_cr", "notes"
+)
+
+# rename
+colnames(df_Post117) = colNames117
+colnames(df_Delayed117) = colNames117
+
+# convert id to be numeric
+df_Post117$id = as.numeric(df_Post117$id)
+df_Delayed117$id = as.numeric(df_Delayed117$id)
+```
+
+### Check duplicated rows 117
+```{r}
+dupRows_Post117 <- df_Post117 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post117)
+
+dupRows_Delayed117 <- df_Delayed117 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+
+print(dupRows_Delayed117)
+```
+clean dup rows post 117
+```{r}
+######## 117 post #######
+
+# 3368, 3718 with later dates should be moved to delayed
+
+## sort by 'id' and 'start_date' in ascending order
+df_Post117 <- df_Post117 %>%
+  arrange(id, start_date)
+
+## remove duplicate 'id's, keeping the first occurrence
+df_Post117 <- df_Post117 %>%
+  filter(!duplicated(id))
+
+## separate the removed rows (later dates)
+rows_to_move <- df_Post117 %>%
+  filter(duplicated(id, fromLast = TRUE))
+
+## append the later rows to 'df_Delayed117'
+df_Delayed117 <- bind_rows(df_Delayed117, rows_to_move)
+
+
+# check duplicated rows again
+dupRows_Post117 <- df_Post117 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+print(dupRows_Post117)
+```
+
+clean dup rows delayed 117
+```{r}
+######## 117 delayed #######
+# 3411 Samantha should be removed
+df_Delayed117 = df_Delayed117 %>% filter(!(id==3411 & ra == "Samantha"))
+
+# 3411  with earlier dates should be moved to df_Post117
+row_to_move <- df_Delayed117 %>%
+  filter(id == 3411) %>%
+  slice_min(order_by = start_date)
+
+## Step 2: Remove this row from df_Delayed117
+df_Delayed117 <- df_Delayed117 %>%
+  filter(!(id == 3411 & start_date == row_to_move$start_date))
+
+## Step 3: Append the identified row to df_Post117
+df_Post117 <- bind_rows(df_Post117, row_to_move)
+
+
+# 3425 KH should be 3426
+df_Delayed117 = df_Delayed117 %>% 
+  mutate(id = if_else(id == 3425 & ra == "KH", 3426, id))
+
+# 3430 and 3278 with earlier dates should be removed (RA already re-entered it to df_Post107)
+## Identify the rows with ids 3430 and 3278 with the earliest dates
+rows_to_move <- df_Delayed117 %>%
+  filter(id %in% c(3430, 3278)) %>%
+  group_by(id) %>%
+  slice_min(order_by = start_date) %>%
+  ungroup()
+
+# remove these rows from df_Delayed117
+df_Delayed117 <- df_Delayed117 %>%
+  anti_join(rows_to_move, by = c("id", "start_date"))
+
+# check duplicated rows again
+dupRows_Delayed117 <- df_Delayed117 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+
+print(dupRows_Delayed117)
+```
+
+### Score 117
+Full score for non CR: 26 points
+```{r}
+# create a function
+Score117Func = function(df) {
+  
+  # q1, 2 points
+  df$q1_init_score = ifelse(grepl("soccer", tolower(df$q1_init_choice)) | 
+                             grepl("soccer", tolower(df$q1_init_text)), 2, 0)
+  
+  df$q1_rpt_score = ifelse(grepl("soccer", tolower(df$q1_rpt_choice)) | 
+                             grepl("soccer", tolower(df$q1_rpt_text)), 1, 0)
+  
+  # q2, 2 points
+  df$q2_init_score = ifelse(grepl("great things", tolower(df$q2_init_choice)) | 
+                             grepl("great things", tolower(df$q2_init_text)), 2, 0)
+  
+  df$q2_rpt_score = ifelse(grepl("great things", tolower(df$q2_rpt_choice)) | 
+                             grepl("great things", tolower(df$q2_rpt_text)), 1, 0)
+  
+  # q3, 2 points
+  df$q3_init_score = ifelse(grepl("tight|small", tolower(df$q3_init_choice)) | 
+                             grepl("tight|small", tolower(df$q3_init_text)), 2, 0)
+  
+  df$q3_rpt_score = ifelse(grepl("tight|small", tolower(df$q3_rpt_choice)) | 
+                             grepl("tight|small", tolower(df$q3_rpt_text)), 1, 0)
+  
+  # q4-cr-no-scpre
+  
+  # q5, 2 points (a+b)
+  df$q5a_init_score = ifelse(grepl("b", tolower(df$q5a_init_choice)) | 
+                             grepl("b", tolower(df$q5a_init_text)), 1, 0)
+  
+  df$q5b_init_score = ifelse(grepl("d", tolower(df$q5b_init_choice)) | 
+                             grepl("d", tolower(df$q5b_init_text)), 1, 0)
+  
+  # q6, 2 points
+  df$q6_init_score = ifelse(grepl("tongue", tolower(df$q6_init_choice)) | 
+                             grepl("tongue", tolower(df$q6_init_text)), 2, 0)
+  
+  df$q6_rpt_score = ifelse(grepl("tongue", tolower(df$q6_rpt_choice)) | 
+                             grepl("tongue", tolower(df$q6_rpt_text)), 1, 0)
+  
+  # q7, 2 points
+  df$q7_init_score = ifelse(grepl("smell", tolower(df$q7_init_choice)) | 
+                             grepl("smell", tolower(df$q7_init_text)), 2, 0)
+  
+  df$q7_rpt_score = ifelse(grepl("smell", tolower(df$q7_rpt_choice)) | 
+                             grepl("smell", tolower(df$q7_rpt_text)), 1, 0)
+  
+  # q8, 2 points
+  df$q8_init_score = ifelse(grepl("miss", tolower(df$q8_init_choice)) | 
+                             grepl("miss", tolower(df$q8_init_text)), 2, 0)
+  
+  df$q8_rpt_score = ifelse(grepl("miss", tolower(df$q8_rpt_choice)) | 
+                             grepl("miss", tolower(df$q8_rpt_text)), 1, 0)
+  
+ # q9, 2 points
+  df$q9_init_score = ifelse(grepl("molt", tolower(df$q9_init_choice)) | 
+                           grepl("molt", tolower(df$q9_init_text)), 2, 0)
+
+  df$q9_rpt_score = ifelse(grepl("molt", tolower(df$q9_rpt_choice)) | 
+                          grepl("molt", tolower(df$q9_rpt_text)), 1, 0)
+
+  # q10, 2 points
+  df$q10_init_score = ifelse(grepl("magnifying", tolower(df$q10_init_choice)) | 
+                            grepl("magnifying", tolower(df$q10_init_text)), 2, 0)
+
+  df$q10_rpt_score = ifelse(grepl("magnifying", tolower(df$q10_rpt_choice)) | 
+                           grepl("magnifying", tolower(df$q10_rpt_text)), 1, 0)
+
+  # q11, 2 points
+  df$q11_init_score = ifelse(grepl("molt", tolower(df$q11_init_choice)) | 
+                              grepl("molt", tolower(df$q11_init_text)), 2, 0)
+  
+  df$q11_rpt_score = ifelse(grepl("molt", tolower(df$q11_rpt_choice)) | 
+                             grepl("molt", tolower(df$q11_rpt_text)), 1, 0)
+  
+  # q12, 2 points
+  df$q12_init_score = ifelse(grepl("molt", tolower(df$q12_init_choice)) | 
+                              grepl("molt", tolower(df$q12_init_text)), 2, 0)
+  
+  df$q12_rpt_score = ifelse(grepl("molt", tolower(df$q12_rpt_choice)) | 
+                             grepl("molt", tolower(df$q12_rpt_text)), 1, 0)
+  
+  # q13, 2 points
+  df$q13_init_score = ifelse(grepl("grow", tolower(df$q13_init_choice)) | 
+                              grepl("grow", tolower(df$q13_init_text)), 2, 0)
+  
+  df$q13_rpt_score = ifelse(grepl("grow", tolower(df$q13_rpt_choice)) | 
+                             grepl("grow", tolower(df$q13_rpt_text)), 1, 0)
+  
+  # q14, 2 points
+  df$q14_init_score = ifelse(grepl("forest|wood|jungle|grass", tolower(df$q14_init_choice)) | 
+                              grepl("forest|wood|jungle|grass", tolower(df$q14_init_text)), 2, 0)
+  
+  df$q14_rpt_score = ifelse(grepl("forest|wood|jungle|grass", tolower(df$q14_rpt_choice)) | 
+                             grepl("forest|wood|jungle|grass", tolower(df$q14_rpt_text)), 1, 0)
+  
+  # q15, cr, no score
+  
+  # initial and reprompt total scores
+  df$init_total_score = rowSums(df %>% dplyr::select(contains("init_score")), na.rm = TRUE)
+  df$rpt_total_score = rowSums(df %>% dplyr::select(contains("rpt_score")), na.rm = TRUE)
+  df$total_score = df$init_total_score + df$rpt_total_score
+  
+  return(df)
+}
+
+# apply to post and delayed 117
+df_Post117 = Score117Func(df_Post117)
+df_Delayed117 = Score117Func(df_Delayed117)
+```
+
+Rename for post and delayed 117
+```{r}
+# Post 117
+colnames(df_Post117)[-1] = paste0("p117_", colnames(df_Post117)[-1])
+
+# Delayed 117
+colnames(df_Delayed117)[-1] = paste0("d117_", colnames(df_Delayed117)[-1])
+```
+
+## Episode 109 post and delayed
+Rename 109
+```{r}
+# print(colnames(df_Post109))
+
+# set up column names for 109
+colNames109 = c("id", "ra", "start_date", "q1_init_choice", "q1_init_text", "q1_rpt_choice", "q1_rpt_text",
+"q2_init_choice", "q2_init_text", "q2_rpt_choice", "q2_rpt_text",
+"q3_init_choice", "q3_init_text", "q3_rpt_choice", "q3_rpt_text",
+"q4a_init_choice", "q4a_init_text",
+"q4b_cr", "q4c_cr", "q4d_cr",
+"q5a_init_choice", "q5a_init_text",
+"q5b_cr",
+"q6a_init_choice", "q6a_init_text",
+"q6b_cr",
+"q7a_init_choice", "q7a_init_text",
+"q7b_cr",
+"q8_init_choice", "q8_init_text", "q8_rpt_choice", "q8_rpt_text",
+"q9_init_choice", "q9_init_text", "q9_rpt_choice", "q9_rpt_text",
+"q10a_cr", "q10b_cr",
+"q11a_cr", "q11b_cr", "q11c_cr",
+"notes")
+
+# rename
+colnames(df_Post109) = colNames109
+colnames(df_Delayed109) = colNames109
+
+# convert id to be numeric
+df_Delayed109$id = as.numeric(df_Delayed109$id)
+df_Post109$id = as.numeric(df_Post109$id)
+```
+
+### Check duplicated rows
+```{r}
+dupRows_Post109 <- df_Post109 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post109)
+
+dupRows_Delayed109 <- df_Delayed109 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+
+print(dupRows_Delayed109)
+```
+Clean dup rows post 109
+```{r}
+# 3425 KH should be 3426
+df_Post109 = df_Post109 %>% 
+  mutate(id = if_else(id == 3425 & ra == "KH", 3426, id))
+
+# 3437 and 3278 with later dates should be moved to df_Delayed109
+## sort by 'id' and 'start_date' in ascending order
+df_Post109 <- df_Post109 %>%
+  arrange(id, start_date)
+
+## remove duplicate 'id's, keeping the first occurrence
+df_Post109 <- df_Post109 %>%
+  filter(!duplicated(id))
+
+## separate the removed rows (later dates)
+rows_to_move <- df_Post109 %>%
+  filter(duplicated(id, fromLast = TRUE))
+
+## append the later rows to 'df_Delayed117'
+df_Delayed109 <- bind_rows(df_Delayed109, rows_to_move)
+
+# check dup rows again
+dupRows_Post109 <- df_Post109 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post109)
+```
+
+### Score 109
+Full score for non CR: 14 points
+```{r}
+# create a function
+Score109Func = function(df) {
+  
+  # q1, 2 points
+  df$q1_init_score = ifelse(grepl("car", tolower(df$q1_init_choice)) | 
+                             grepl("car", tolower(df$q1_init_text)), 2, 0)
+  
+  df$q1_rpt_score = ifelse(grepl("car", tolower(df$q1_rpt_choice)) | 
+                             grepl("car", tolower(df$q1_rpt_text)), 1, 0)
+  
+  # q2, 2 points
+  df$q2_init_score = ifelse(grepl("slow", tolower(df$q2_init_choice)) | 
+                             grepl("slow", tolower(df$q2_init_text)), 2, 0)
+  
+  df$q2_rpt_score = ifelse(grepl("slow", tolower(df$q2_rpt_choice)) | 
+                             grepl("slow", tolower(df$q2_rpt_text)), 1, 0)
+  
+  # q3, 2 points
+  df$q3_init_score = ifelse(grepl("point|streamline", tolower(df$q3_init_choice)) | 
+                             grepl("point|streamline", tolower(df$q3_init_text)), 2, 0)
+  
+  df$q3_rpt_score = ifelse(grepl("point|streamline", tolower(df$q3_rpt_choice)) | 
+                             grepl("point|streamline", tolower(df$q3_rpt_text)), 1, 0)
+  
+  # q4a, initial only, 1 point
+  df$q4a_init_score = ifelse(
+    grepl("paint", tolower(df$q4a_init_choice)) & 
+    grepl("cupholder", tolower(df$q4a_init_choice)) & 
+    grepl("shape", tolower(df$q4a_init_choice)) |
+    grepl("paint", tolower(df$q4a_init_text)) & 
+    grepl("cupholder", tolower(df$q4a_init_text)) & 
+    grepl("shape", tolower(df$q4a_init_text)),
+  1, 0)
+  
+  # q4b, q4c, q4d, cr, no score
+  
+  # q5a, initial only, 1 point
+  df$q5a_init_score = ifelse(grepl("a", tolower(df$q5a_init_choice)) | 
+                             grepl("a", tolower(df$q5a_init_text)), 1, 0)
+  
+  # q5b, cr, no score
+  
+  # q6a, initial only, 1 point
+  df$q6a_init_score = ifelse(grepl("a", tolower(df$q6a_init_choice)) | 
+                             grepl("a", tolower(df$q6a_init_text)), 1, 0)
+  
+  # q6b, cr, no score
+  
+  # q7a, initial only, 1 point
+  df$q7a_init_score = ifelse(grepl("c", tolower(df$q7a_init_choice)) | 
+                             grepl("c", tolower(df$q7a_init_text)), 1, 0)
+  
+  # q7b, cr, no score
+  
+  # q8, 2 points
+  df$q8_init_score = ifelse(grepl("fast", tolower(df$q8_init_choice)) | 
+                             grepl("fast", tolower(df$q8_init_text)), 2, 0)
+  
+  df$q8_rpt_score = ifelse(grepl("fast", tolower(df$q8_rpt_choice)) | 
+                             grepl("fast", tolower(df$q8_rpt_text)), 1, 0)
+  
+ # q9, 2 points
+  df$q9_init_score = ifelse(grepl("pushed back", tolower(df$q9_init_choice)) | 
+                           grepl("pushed back", tolower(df$q9_init_text)), 2, 0)
+
+  df$q9_rpt_score = ifelse(grepl("pushed back", tolower(df$q9_rpt_choice)) | 
+                          grepl("pushed back", tolower(df$q9_rpt_text)), 1, 0)
+  
+  # q10, cr, no score
+  
+  # q11, cr, no score
+  
+  # initial and reprompt total scores
+  df$init_total_score = rowSums(df %>% dplyr::select(contains("init_score")), na.rm = TRUE)
+  df$rpt_total_score = rowSums(df %>% dplyr::select(contains("rpt_score")), na.rm = TRUE)
+  df$total_score = df$init_total_score + df$rpt_total_score
+  
+  return(df)
+}
+
+# apply to post and delayed 109
+df_Post109 = Score109Func(df_Post109)
+df_Delayed109 = Score109Func(df_Delayed109)
+```
+
+Rename for post and delayed 109
+```{r}
+# Post 109
+colnames(df_Post109)[-1] = paste0("p109_", colnames(df_Post109)[-1])
+
+# Delayed 109
+colnames(df_Delayed109)[-1] = paste0("d109_", colnames(df_Delayed109)[-1])
+```
+
+## Episode 101 post
+```{r}
+# print(colnames(df_Post101))
+
+# set up column names for 101
+colNames101 = c("id", "ra" , "start_date",
+                "q1_init_choice", "q1_init_text", "q1_rpt_choice", "q1_rpt_text",
+                "q2_init_choice", "q2_init_text", "q2_rpt_choice", "q2_rpt_text",
+                "q3_init_choice", "q3_init_text", "q3_rpt_choice", "q3_rpt_text",
+                "q4_init_choice", "q4_init_text", "q4_rpt_choice", "q4_rpt_text",
+                "q5_init_choice", "q5_init_text", "q5_rpt_choice", "q5_rpt_text",
+                "q6_init_choice", "q6_init_text", "q6_rpt_choice", "q6_rpt_text",
+                "q7_init_choice", "q7_init_text", "q7_rpt_choice", "q7_rpt_text",
+                "q8_init_choice", "q8_init_text", "q8_rpt_choice", "q8_rpt_text",
+                "q9a_init_choice", "q9a_init_text", "q9b_init_choice", "q9b_init_text",
+                "q10_init_choice", "q10_init_text", "q10_rpt_choice", "q10_rpt_text",
+                "q11_init_choice", "q11_init_text", "q11_rpt_choice", "q11_rpt_text",
+                
+                # vocab
+                "q12a_cr", "q12b_init_choice", 
+                "q13a_init_choice", "q13b_init_choice", "q13c_init_choice", "q13d_init_choice",
+                "q14a_init_choice", "q14b_init_choice", "q14c_init_choice", 
+                "notes")
+
+# rename
+colnames(df_Post101) = colNames101
+# convert id to be numeric
+df_Post101$id = as.numeric(df_Post101$id)
+```
+
+### Check dup rows post 101
+```{r}
+dupRows_Post101 <- df_Post101 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post101)
+
+```
+```{r}
+# 3399, 3398, 3396 have dups and both rows should be removed
+df_Post101 = df_Post101 %>% filter(id!=3399 & id!=3398 & id!=3396)
+
+# 3289 and 3681 with earlier time should be removed
+## Identify the rows with ids 3430 and 3278 with the earliest dates
+rows_to_move <- df_Post101 %>%
+  filter(id %in% c(3289, 3681)) %>%
+  group_by(id) %>%
+  slice_min(order_by = start_date) %>%
+  ungroup()
+
+# remove these rows from df_Post101
+df_Post101 <- df_Post101 %>%
+  anti_join(rows_to_move, by = c("id", "start_date"))
+
+
+# check duplicated rows again
+dupRows_Post101 <- df_Post101 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post101)
+```
+
+
+### Score 101
+- Full score for non CR items: 22 points
+- Full score for vocab items: 8 points
+```{r}
+# create a function
+Score101Func = function(df) {
+  
+  # convert empty string to NA
+  df[df==""]<-NA
+  
+  # q1, 2 points
+  df$q1_init_score = ifelse(grepl("nectar", tolower(df$q1_init_choice)) | 
+                             grepl("nectar", tolower(df$q1_init_text)), 2, 0)
+  
+  df$q1_rpt_score = ifelse(grepl("nectar", tolower(df$q1_rpt_choice)) | 
+                             grepl("nectar", tolower(df$q1_rpt_text)), 1, 0)
+  
+  # q2, 2 points
+  df$q2_init_score = ifelse(grepl("water", tolower(df$q2_init_choice)) | 
+                             grepl("water", tolower(df$q2_init_text)), 2, 0)
+  
+  df$q2_rpt_score = ifelse(grepl("water", tolower(df$q2_rpt_choice)) | 
+                             grepl("water", tolower(df$q2_rpt_text)), 1, 0)
+  
+  # q3, 2 points
+  df$q3_init_score = ifelse(grepl("wing", tolower(df$q3_init_choice)) &
+                              grepl("flap", tolower(df$q3_init_choice)) | 
+                              grepl("wing", tolower(df$q3_init_text)) &
+                              grepl("flap", tolower(df$q3_init_text)), 2, 0)
+  
+  df$q3_rpt_score = ifelse(grepl("wing", tolower(df$q3_rpt_choice)) &
+                              grepl("flap", tolower(df$q3_rpt_choice)) | 
+                              grepl("wing", tolower(df$q3_rpt_text)) &
+                              grepl("flap", tolower(df$q3_rpt_text)), 1, 0)
+  
+  # q4, 2 points
+  df$q4_init_score = ifelse(grepl("thick|sticky|gooey|slimy", tolower(df$q4_init_choice)) | 
+                             grepl("thick|sticky|gooey|slimy", tolower(df$q4_init_text)), 2, 0)
+  
+  df$q4_rpt_score = ifelse(grepl("thick|sticky|gooey|slimy", tolower(df$q4_rpt_choice)) | 
+                             grepl("thick|sticky|gooey|slimy", tolower(df$q4_rpt_text)), 1, 0)
+  
+  # q5, 2 points
+  df$q5_init_score = ifelse(grepl("ketchup", tolower(df$q5_init_choice)) | 
+                             grepl("ketchup", tolower(df$q5_init_text)), 2, 0)
+
+  df$q5_rpt_score = ifelse(grepl("ketchup", tolower(df$q5_rpt_choice)) | 
+                             grepl("ketchup", tolower(df$q5_rpt_text)), 1, 0)
+  
+  # q6, 2 points
+  df$q6_init_score = ifelse(grepl("ketchup", tolower(df$q6_init_choice)) & 
+                             grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q6_init_choice)) | 
+                             grepl("ketchup", tolower(df$q6_init_text)) &
+                             grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q6_init_text)), 2, 0)
+  
+  df$q6_rpt_score = ifelse(grepl("ketchup", tolower(df$q6_rpt_choice)) & 
+                             grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q6_rpt_choice)) | 
+                             grepl("ketchup", tolower(df$q6_rpt_text)) &
+                             grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q6_rpt_text)), 1, 0)
+  
+  # q7, 2 points
+  df$q7_init_score = ifelse(grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q7_init_choice)) | 
+                             grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q7_init_text)), 2, 0)
+  
+  df$q7_rpt_score = ifelse(grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q7_rpt_choice)) | 
+                             grepl("thick|sticky|gooey|goopy|slimy", tolower(df$q7_rpt_text)), 1, 0)
+  
+  # q8, 2 points
+  df$q8_init_score = ifelse(grepl("honey", tolower(df$q8_init_choice)) | 
+                             grepl("honey", tolower(df$q8_init_text)), 2, 0)
+  
+  df$q8_rpt_score = ifelse(grepl("honey", tolower(df$q8_rpt_choice)) | 
+                             grepl("honey", tolower(df$q8_rpt_text)), 1, 0)
+  
+ # q9, 2 points (a+b)
+  df$q9a_init_score = ifelse(grepl("a", tolower(df$q9a_init_choice)) | 
+                           grepl("a", tolower(df$q9a_init_text)), 1, 0)
+
+  df$q9b_init_score = ifelse(grepl("b", tolower(df$q9b_init_choice)) | 
+                           grepl("b", tolower(df$q9b_init_text)), 1, 0)
+
+  # q10, 2 points
+  df$q10_init_score = ifelse(grepl("add|put|with", tolower(df$q10_init_choice)) &
+                              grepl("water", tolower(df$q10_init_choice)) | 
+                             grepl("add|put|with", tolower(df$q10_init_text)) &
+                              grepl("water", tolower(df$q10_init_text)), 2, 0)
+
+  df$q10_rpt_score = ifelse(grepl("add|put|with", tolower(df$q10_rpt_choice)) &
+                              grepl("water", tolower(df$q10_rpt_choice)) | 
+                             grepl("add|put|with", tolower(df$q10_rpt_text)) &
+                              grepl("water", tolower(df$q10_rpt_text)), 1, 0)
+
+  # q11, 2 points
+  df$q11_init_score = ifelse(grepl("add|put|with", tolower(df$q11_init_choice)) &
+                              grepl("water", tolower(df$q11_init_choice)) | 
+                             grepl("add|put|with", tolower(df$q11_init_text)) &
+                              grepl("water", tolower(df$q11_init_text)), 2, 0)
+
+  df$q11_rpt_score = ifelse(grepl("add|put|with", tolower(df$q11_rpt_choice)) &
+                              grepl("water", tolower(df$q11_rpt_choice)) | 
+                             grepl("add|put|with", tolower(df$q11_rpt_text)) &
+                              grepl("water", tolower(df$q11_rpt_text)), 1, 0)
+  
+  ### vocab items
+  ## q12a, cr, no score
+
+  # q12b, 1 point
+  df$q12b_score_vocab <- ifelse(is.na(df$q12b_init_choice), NA, 
+                                ifelse(grepl("c", tolower(df$q12b_init_choice)), 1, 0))
+  
+  # q13a, 1 point
+  df$q13a_score_vocab <- ifelse(is.na(df$q13a_init_choice), NA, 
+                                ifelse(grepl("yes", tolower(df$q13a_init_choice)), 1, 0))
+  
+  # q13b, 1 point
+  df$q13b_score_vocab <- ifelse(is.na(df$q13b_init_choice), NA, 
+                                ifelse(grepl("\\bno\\b", tolower(df$q13b_init_choice)), 1, 0))
+  
+  # q13c, 1 point
+  df$q13c_score_vocab <- ifelse(is.na(df$q13c_init_choice), NA, 
+                                ifelse(grepl("yes", tolower(df$q13c_init_choice)), 1, 0))
+  
+  # q13d, 1 point
+  df$q13d_score_vocab <- ifelse(is.na(df$q13d_init_choice), NA, 
+                                ifelse(grepl("\\bno\\b", tolower(df$q13d_init_choice)), 1, 0))
+  
+  # q14a, 1 point
+  df$q14a_score_vocab <- ifelse(is.na(df$q14a_init_choice), NA, 
+                                ifelse(grepl("\\bno\\b", tolower(df$q14a_init_choice)), 1, 0))
+  
+  # q14b, 1 point
+  df$q14b_score_vocab <- ifelse(is.na(df$q14b_init_choice), NA, 
+                                ifelse(grepl("yes", tolower(df$q14b_init_choice)), 1, 0))
+  
+  # q14c, 1 point
+  df$q14c_score_vocab <- ifelse(is.na(df$q14c_init_choice), NA, 
+                                ifelse(grepl("\\bno\\b", tolower(df$q14c_init_choice)), 1, 0))
+
+  
+  # initial and reprompt total scores
+  df$init_total_score = rowSums(df %>% dplyr::select(contains("init_score")), na.rm = TRUE)
+  df$rpt_total_score = rowSums(df %>% dplyr::select(contains("rpt_score")), na.rm = TRUE)
+  df$vocab_total_score = rowSums(df %>% dplyr::select(contains("score_vocab")), na.rm = F)
+  df$total_score = df$init_total_score + df$rpt_total_score
+  
+  # convert children not receiving vocab items to NA
+  
+  
+  return(df)
+}
+
+# apply to post 101
+df_Post101 = Score101Func(df_Post101)
+```
+
+Rename for post101
+```{r}
+# Post 101
+colnames(df_Post101)[-1] = paste0("p101_", colnames(df_Post101)[-1])
+```
+
+
+## Write csv
+```{r}
+# csv
+write.csv(df_Tracker, "clean_data/tracker.csv")
+write.csv(df_Post117, "clean_data/post_117.csv")
+write.csv(df_Delayed117, "clean_data/delayed_117.csv")
+
+write.csv(df_Post109, "clean_data/post_109.csv")
+write.csv(df_Delayed109, "clean_data/delayed_109.csv")
+
+write.csv(df_Post101, "clean_data/post_101.csv")
+
+# excel
+write.xlsx(df_Post117, "clean_data/post_117.xlsx")
+write.xlsx(df_Delayed117, "clean_data/delayed_117.xlsx")
+
+write.xlsx(df_Post109, "clean_data/post_109.xlsx")
+write.xlsx(df_Delayed109, "clean_data/delayed_109.xlsx")
+
+write.xlsx(df_Post101, "clean_data/post_101.xlsx")
+```
+
+# 4. Merge scores to tracker
+```{r}
+df_Master = merge(df_Tracker, df_Post117, by=c("id"), all.x=T)
+df_Master = merge(df_Master, df_Delayed117, by=c("id"), all.x=T)
+df_Master = merge(df_Master, df_Post109, by=c("id"), all.x=T)
+df_Master = merge(df_Master, df_Delayed109, by=c("id"), all.x=T)
+df_Master = merge(df_Master, df_Post101, by=c("id"), all.x=T)
+```
+
+```{r}
+# check duplicated rows again
+dupRows <- df_Master %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows)
+```
+
+```{r}
+# rename CA to be group
+df_Master = df_Master %>% rename(group =CA)
+
+# generate final total score
+df_Master$agg_post_score = df_Master$p117_total_score + df_Master$p109_total_score + df_Master$p101_total_score
+df_Master$agg_delayed_score = df_Master$d117_total_score + df_Master$d109_total_score
+
+# write
+ write.csv(df_Master, "clean_data/master.csv")
+```
+
+
