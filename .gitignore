@@ -1,2 +1,5 @@
 raw_data/
 clean_data/
+supporting_materials/
+
+.DS_Store
