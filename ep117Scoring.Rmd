@@ -665,15 +665,15 @@ df_Post117$p117_total_score = rowSums(df_Post117[, c("q1_soccer_score", "q2_luck
                                na.rm = TRUE)
 
 # Calculate recall and transfer score
-## recall items: q1, q2, q3, q4, q6, q7, q8, q9,q13, q14
-## transfer items: q5, q10, q11, q12, q15
+## recall items: q1, q2, q3, q4, q6, q7, q8, q9, q12, q13, q14
+## transfer items: q5, q10, q11, q15
 df_Post117$p117_recall_score = rowSums(df_Post117[, c("q1_soccer_score", "q2_lucky_score", "q3_shirt_score", 
                                                 "q4_diff_cr_score", "q6_smell_score", "q7_flick_score", 
-                                                "q8_tight_score", "q9_two_score", "q13_lose_score", "q14_return_score")], 
+                                                "q8_tight_score", "q9_two_score", "q12_mom_score", "q13_lose_score", "q14_return_score")], 
                                na.rm = TRUE)
 
 df_Post117$p117_transfer_score = rowSums(df_Post117[, c("q5_wall_score", "q10_book_score", 
-                                                "q11_skin_score", "q12_mom_score", "q15_grasshopper_cr_score")],
+                                                "q11_skin_score", "q15_grasshopper_cr_score")],
                                na.rm = TRUE)
 
 # Calculate narrative and science score
@@ -719,15 +719,15 @@ df_Delayed117$d117_total_score = rowSums(df_Delayed117[, c("q1_soccer_score", "q
                                na.rm = TRUE)
 
 # Calculate recall and transfer score
-## recall items: q1, q2, q3, q4, q6, q7, q8, q9,q13, q14
-## transfer items: q5, q10, q11, q12, q15
+## recall items: q1, q2, q3, q4, q6, q7, q8, q9, q12, q13, q14
+## transfer items: q5, q10, q11, q15
 df_Delayed117$d117_recall_score = rowSums(df_Delayed117[, c("q1_soccer_score", "q2_lucky_score", "q3_shirt_score", 
                                                 "q4_diff_cr_score", "q6_smell_score", "q7_flick_score", 
-                                                "q8_tight_score", "q9_two_score", "q13_lose_score", "q14_return_score")], 
+                                                "q8_tight_score", "q9_two_score", "q12_mom_score", "q13_lose_score", "q14_return_score")], 
                                na.rm = TRUE)
 
 df_Delayed117$d117_transfer_score = rowSums(df_Delayed117[, c("q5_wall_score", "q10_book_score", 
-                                                "q11_skin_score", "q12_mom_score", "q15_grasshopper_cr_score")],
+                                                "q11_skin_score", "q15_grasshopper_cr_score")],
                                na.rm = TRUE)
 
 # Calculate narrative and science score
