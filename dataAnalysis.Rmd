@@ -1,0 +1,2268 @@
+---
+title: "data_analysis"
+author: "Kunlei He"
+date: "2024-02-20"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    toc_collapse: true
+    number_sections: true
+    df_print: paged
+    theme: lumen
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+```
+
+# Load library
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(MuMIn)
+library(lmerTest)
+library(lavaan)
+library(mice)
+library(MatchIt)
+library(tidyr)
+library(moments)
+library(openxlsx)
+library(MatchIt)
+library(cobalt)
+library(mitml)
+library(miceadds)
+library(broom.mixed)
+```
+
+
+# Load data
+```{r}
+df_MasterLong = read.csv("clean_data/master_long.csv")
+df_Tracker = read.csv("clean_data/tracker_full.csv")
+df_MasterWide = read.csv("clean_data/master_wide.csv")
+df_Pretest = read.csv("clean_data/pre_test.csv")
+
+# Raw data
+df_RawTracker = read.xlsx("raw_data/raw_tracker.xlsx")
+
+# missing age and ethincity filled out
+df_MissingAgeEthnicityFilled = read.csv("clean_data/processed_data/missing_age_ethnicity_filled.csv")
+
+# read full data
+df_MasterWideFull <- read.csv("clean_data/processed_data/master_wide_full.csv")
+
+df_MasterLongFull <- read.csv("clean_data/processed_data/master_long_full.csv")
+
+```
+
+## 2024-08-19
+```{r}
+
+```
+
+
+
+```{r}
+# compute missing data in df_MasterLong
+md.pattern(df_MasterWideFull %>% select(MEFS_score, lens_score, ToM_total_score, pre_test_total_score, p117_total_score, d117_total_score, p109_total_score, d109_total_score, p101_total_score), rotate.names = TRUE)
+
+md.pattern(df_MasterWideFull %>% select(MEFS_score, lens_score, ToM_total_score, pre_test_total_score, QUILS_score), rotate.names = TRUE)
+
+md.pattern(df_MasterWideFull %>% select(p117_total_score, d117_total_score, p109_total_score, d109_total_score, p101_total_score), rotate.names = TRUE)
+
+md.pattern(df_MasterWideFull %>% select(p117_total_score, p109_total_score, p101_total_score), rotate.names = TRUE)
+
+md.pattern(df_MasterWideFull %>% select(d117_total_score, d109_total_score), rotate.names = TRUE)
+```
+
+```{r}
+colnames(df_MasterLong)
+```
+
+
+# Data Wrangling with Raw Data
+## Merge pre_test
+```{r}
+# find rows with duplicated id
+# df_Pretest %>% group_by(id) %>% filter(n() > 1) %>% select(id, pre_test_total_score)
+
+# for duplicated rows, keep rows where pre_test_total_score has a larger value
+# if there are still duplicated rows, keep the first row
+# df_Pretest <- df_Pretest %>% arrange(id, desc(pre_test_total_score)) %>% distinct(id, .keep_all = TRUE)
+#
+# # check duplicated ids again
+# df_Pretest %>% group_by(id) %>% filter(n() > 1) %>% select(id, pre_test_total_score)
+```
+
+```{r}
+# # Merge to wide, leftjoin
+# df_MasterWide <- merge(df_MasterWide, df_Pretest %>% select(id, pre_test_total_score), by = "id", all.x = T)
+#
+# # Merge to long
+# df_MasterLong <- merge(df_MasterLong, df_Pretest %>% select(id, pre_test_total_score), by = "id", all.x = T)
+#
+# # write
+# # write.csv(df_MasterWide, "clean_data/master_wide.csv", row.names = FALSE)
+# # write.csv(df_MasterLong, "clean_data/master_long.csv", row.names = FALSE)
+```
+
+## Resolve missing age and ethnicity
+### Find missing data
+```{r}
+# find ids with missing age
+df_MissingAgeEthnicity <- df_MasterWide %>% filter(is.na(age) | is.na(ethnicity))
+
+# remove the first row
+names(df_RawTracker) = as.character(unlist(df_RawTracker[1, ]))  # Set the first row as names
+df_RawTracker = df_RawTracker[-1, ]  # Remove the first row from the data
+
+# for ids in df_MissingAge, find student_name and location from df_RawTracker
+df_MissingAgeEthnicity <- merge(df_MissingAgeEthnicity, df_RawTracker %>% select(student_name, id), by = "id")
+df_MissingAgeEthnicity <- df_MissingAgeEthnicity %>% select(id, student_name, age, gender, ethnicity, location, group)
+
+# write
+# write.csv(df_MissingAgeEthnicity, "clean_data/processed_data/missing_age_ethnicity.csv", row.names = FALSE)
+```
+
+### Fill missing data
+```{r}
+# turn dob into date
+df_MissingAgeEthnicityFilled$dob = as.Date(df_MissingAgeEthnicityFilled$dob, format="%m/%d/%y")
+df_MasterWide$dob <- as.Date(df_MasterWide$dob, format="%m/%d/%y")
+df_MasterWide$ep117_posttest_date <- as.Date(df_MasterWide$ep117_posttest_date, format="%m/%d/%y")
+
+# In df_MasterWide, for rows where dob is NA, look for their values in df_MissingAgeEthnicityFilled
+# if found, fill in the missing values in df_MasterWide
+df_MasterWide$id <- as.numeric(df_MasterWide$id)
+df_MissingAgeEthnicityFilled$id <- as.numeric(df_MissingAgeEthnicityFilled$id)
+
+
+df_MasterWide <- df_MasterWide %>%
+  left_join(df_MissingAgeEthnicityFilled %>% select(id, dob, ethnicity), by = "id", suffix = c("", ".missing")) %>%
+  mutate(
+    dob = ifelse(is.na(dob), dob.missing, dob),
+    ethnicity = ifelse(is.na(ethnicity), ethnicity.missing, ethnicity)
+  ) %>%
+  select(-dob.missing, -ethnicity.missing)
+```
+
+```{r}
+# calcualte age
+## for rows in df_MasterWide where age is NA, calculate age = (ep117_posttest_date - dob)/365.25
+df_MasterWide$dob <- as.Date(df_MasterWide$dob, format="%m/%d/%y")
+df_MasterWide$ep117_posttest_date <- as.Date(df_MasterWide$ep117_posttest_date, format="%m/%d/%y")
+
+df_MasterWide$age = ifelse(is.na(df_MasterWide$age), round(as.numeric(df_MasterWide$ep117_posttest_date - df_MasterWide$dob)/365.25,2), df_MasterWide$age)
+```
+
+```{r}
+# fill in df_MasterLong
+df_MasterLong <- df_MasterLong %>%
+  left_join(df_MasterWide %>% select(id, age, ethnicity, gender), by = "id", suffix = c("", ".wide")) %>%
+  mutate(
+    age = ifelse(is.na(age), age.wide, age),
+    ethnicity = ifelse(is.na(ethnicity), ethnicity.wide, ethnicity),
+    gender = ifelse(is.na(gender), gender.wide, gender)
+  ) %>%
+  select(-age.wide, -ethnicity.wide, -gender.wide)
+```
+
+```{r}
+# double check age and ethnicity to see if there's missing data in df_MasterWide and df_MasterLong
+df_MasterWide %>% filter(is.na(age))
+df_MasterLong %>% filter(is.na(age))
+```
+## Add site
+```{r}
+# create a new column in df_MasterWide called dll, if location is NA, dll = NA; if location == dll, dll = "n"; if location is not NA and not dll, dll= "n"
+
+df_MasterWide$site <- ifelse(is.na(df_MasterWide$location), NA, ifelse(df_MasterWide$location == "dll", "lab", "elsol_delhi"))
+
+# merge df_MasterWide$site to df_MasterLong by id
+df_MasterLong <- merge(df_MasterLong, df_MasterWide %>% select(id, site), by = "id")
+```
+
+
+## Check condition, standardize, write data
+```{r}
+# by group
+table(df_MasterWide$group)
+
+# by condition
+unique_participants <- df_MasterLong %>%
+  group_by(id, condition) %>%
+  summarize(
+    age = first(age),
+    gender = first(gender),
+    ethnicity = first(ethnicity),
+    QUILS_score = first(QUILS_score),
+    lens_score = first(lens_score),
+    ToM_total_score = first(ToM_total_score),
+    MEFS_score = first(MEFS_score),
+    .groups = 'drop'
+  )
+
+table(unique_participants$condition)
+
+```
+### Standardization function
+```{r}
+standardization <- function(df_MasterLong, df_MasterWide) {
+  # Define the maximum scores for each episode
+  max_scores <- c('117' = 34, '109' = 25, '101' = 22)
+  
+  # Standardizing scores within df_MasterLong
+  df_MasterLong <- df_MasterLong %>%
+    group_by(episode) %>%
+    mutate(
+      z_post_total_score = as.vector(scale(post_total_score)),
+      z_delayed_total_score = as.vector(scale(delayed_total_score))
+    ) %>%
+    ungroup()
+
+  # Computing percentage for each episode using max_scores
+  df_MasterLong <- df_MasterLong %>%
+    mutate(
+      post_total_score_prop = post_total_score / max_scores[as.character(episode)],
+      delayed_total_score_prop = delayed_total_score / max_scores[as.character(episode)]
+    )
+
+  # Standardizing scores within df_MasterWide
+  df_MasterWide <- df_MasterWide %>%
+    mutate(
+      z_QUILS_score = as.vector(scale(QUILS_score)),
+      z_lens_score = as.vector(scale(lens_score)),
+      z_MEFS_score = as.vector(scale(MEFS_score))
+    )
+
+  # Select and merge standardized scores to df_MasterLong by 'id'
+  df_MasterLong <- merge(df_MasterLong, df_MasterWide %>% select(id, z_QUILS_score, z_lens_score, z_MEFS_score), by = "id")
+
+  return(list(df_MasterLong = df_MasterLong, df_MasterWide = df_MasterWide))
+}
+```
+
+### Deal with ids conducted wrong condition 
+```{r}
+## find rows with wrong condition
+df_WrongCond <- df_MasterLong %>% filter((group == "CA" & condition != "interactive") | (group == "noCA" & condition == "interactive"))
+```
+
+#### Not remove those ids
+```{r}
+df_MasterWideFull <- df_MasterWide
+df_MasterLongFull <- df_MasterLong
+```
+
+Standardize
+```{r}
+# standardize
+df_MasterLongFull <- standardization(df_MasterLongFull, df_MasterWideFull)$df_MasterLong
+df_MasterWideFull <- standardization(df_MasterLongFull, df_MasterWideFull)$df_MasterWide
+```
+
+Write
+```{r}
+# write.csv(df_MasterLongFull, "clean_data/processed_data/master_long_full.csv", row.names = FALSE)
+# write.csv(df_MasterWideFull, "clean_data/processed_data/master_wide_full.csv", row.names = FALSE)
+
+```
+
+#### Remove those ids
+```{r}
+# remove ids in df_WrongCond from df_MasterLong
+df_MasterLongCleanGroup <- df_MasterLong %>% filter(!(id %in% df_WrongCond$id))
+
+# removes ids in df_WrongCond from df_MasterWide
+df_MasterWideCleanGroup <- df_MasterWide %>% filter(!(id %in% df_WrongCond$id))
+```
+
+Standardize
+```{r}
+# standardize
+df_MasterLongCleanGroup <- standardization(df_MasterLongCleanGroup, df_MasterWideCleanGroup)$df_MasterLong
+df_MasterWideCleanGroup <- standardization(df_MasterLongCleanGroup, df_MasterWideCleanGroup)$df_MasterWide
+```
+
+```{r}
+# write.csv(df_MasterLongCleanGroup, "clean_data/processed_data/master_long_clean_group.csv", row.names = FALSE)
+# write.csv(df_MasterWideCleanGroup, "clean_data/processed_data/master_wide_clean_group.csv", row.names = FALSE)
+```
+
+#### Only remove wrong sessions
+```{r}
+# only remove wrong sessions from df_MasterLong
+df_MasterLongCleanSesh <- df_MasterLong %>% filter(!(group == "CA" & condition != "interactive"))
+df_MasterLongCleanSesh <- df_MasterLong %>% filter(!(group == "noCA" & condition == "interactive"))
+
+
+## check condition distribution
+unique_participants_full <- df_MasterLongCleanSesh %>%
+  group_by(id, condition) %>%
+  summarize(
+    age = first(age),
+    gender = first(gender),
+    ethnicity = first(ethnicity),
+    QUILS_score = first(QUILS_score),
+    lens_score = first(lens_score),
+    ToM_total_score = first(ToM_total_score),
+    MEFS_score = first(MEFS_score),
+    .groups = 'drop'
+  )
+
+table(unique_participants_full$condition)
+
+```
+
+```{r}
+# standardize
+df_MasterLongCleanSesh <- standardization(df_MasterLongCleanSesh, df_MasterWideFull)$df_MasterLong
+```
+
+```{r}
+# write.csv(df_MasterLongCleanSesh, "clean_data/processed_data/master_long_clean_sesh.csv", row.names = FALSE)
+```
+
+
+# EDA
+## Load data
+```{r}
+```
+
+```{r}
+# relevel data
+relevel_condition <- function(df) {
+  # Specifying the levels for the 'condition' factor
+  factor_levels <- c("interactive", "human", "semi", "no")
+  
+  # Adjust 'condition' in the given data frame
+  df$condition <- factor(df$condition, levels = factor_levels)
+  
+  return(df)
+}
+
+df_MasterLongFull <- relevel_condition(df_MasterLongFull)
+df_MasterLongCleanGroup <- relevel_condition(df_MasterLongCleanGroup)
+df_MasterLongCleanSesh <- relevel_condition(df_MasterLongCleanSesh)
+```
+
+## Descriptive stats with raw data
+```{r}
+# function
+Summarize_By_Group <- function(data, parameter) {
+  # Ensure the parameter is a string and exists in the dataframe
+  if (!is.character(parameter) || !(parameter %in% names(data))) {
+    stop("Parameter should be a column name in the data frame.")
+  }
+
+  # Dynamically specify the column to summarize using the rlang package for tidy evaluation
+  parameter_sym <- rlang::sym(parameter)
+
+  return(data %>%
+    group_by(group) %>%
+    summarise(
+      Mean = mean(!!parameter_sym, na.rm = TRUE),
+      SD = sd(!!parameter_sym, na.rm = TRUE),
+      Median = median(!!parameter_sym, na.rm = TRUE),
+      Min = min(!!parameter_sym, na.rm = TRUE),
+      Max = max(!!parameter_sym, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(!!parameter_sym))
+    ))
+}
+```
+
+### Baseline Summary by group
+```{r}
+print("Age")
+df_AgeByGroup = Summarize_By_Group(df_MasterWide, "age")
+model = aov(age ~ group, data = df_MasterWide)
+summary(model)
+
+print("Pre-test")
+df_PretestByGroup = Summarize_By_Group(df_MasterWide, "pre_test_total_score")
+model = aov(pre_test_total_score ~ group, data = df_MasterWide)
+summary(model)
+
+print("QUILS")
+df_QUILSByGroup = Summarize_By_Group(df_MasterWide, "QUILS_score")
+model = aov(QUILS_score ~ group, data = df_MasterWide)
+summary(model)
+
+print("Lens")
+df_LensByGroup = Summarize_By_Group(df_MasterWide, "lens_score")
+model = aov(lens_score ~ group, data = df_MasterWide)
+summary(model)
+
+print("ToM")
+df_ToMByGroup = Summarize_By_Group(df_MasterWide, "ToM_total_score")
+model = aov(ToM_total_score ~ group, data = df_MasterWide)
+summary(model)
+
+print("MEFS")
+df_MefsByGroup = Summarize_By_Group(df_MasterWide, "MEFS_score")
+model = aov(MEFS_score ~ group, data = df_MasterWide)
+summary(model)
+
+print("Gender")
+tbl_GenderByGroup <- table(df_MasterWide$gender, df_MasterWide$group)
+print(tbl_GenderByGroup)
+model <- chisq.test(tbl_GenderByGroup)
+print(model)
+
+print("Ethnicity")
+tbl_EthnicityByGroup <- table(df_MasterWide$ethnicity, df_MasterWide$group)
+print(tbl_EthnicityByGroup)
+model <- chisq.test(tbl_EthnicityByGroup)
+print(model)
+```
+
+Visualize
+```{r}
+# age
+## plot two overlapping histogram of age by group
+ggplot(df_MasterWide, aes(x = age, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="Age by Group",
+       x="Age",
+       y="Count") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# pre-test
+## plot two overlapping histogram of age by group
+ggplot(df_MasterWide, aes(x = pre_test_total_score, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="Pre-test by Group",
+       x="Pre-test",
+       y="Count") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+
+
+# QUILS by group
+## plot two overlapping histogram of QUILS by group
+ggplot(df_MasterWide, aes(x = QUILS_score, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="QUILS by Group",
+       x="QUILS Score",
+       y="Count") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# Lens by group
+## plot two overlapping histogram of Lens by group
+ggplot(df_MasterWide, aes(x = lens_score, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="Lens by Group",
+       x="Lens Score",
+       y="Count") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# ToM by group
+## plot two overlapping histogram of ToM by group
+ggplot(df_MasterWide, aes(x = ToM_total_score, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="ToM by Group",
+       x="ToM Score",
+       y="Count") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# MEFS by group
+## plot two overlapping histogram of MEFS by group
+ggplot(df_MasterWide, aes(x = MEFS_score, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="MEFS by Group",
+       x="MEFS Score",
+       y="Count") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+### Outcome summary by condition
+
+
+#### Post-test
+```{r}
+# by condition and episode 
+df_PostByCond <- df_MasterLong %>% 
+  group_by(condition) %>%
+    summarise(
+      Mean = mean(post_total_score_prop, na.rm = TRUE),
+      SD = sd(post_total_score_prop, na.rm = TRUE),
+      Median = median(post_total_score_prop, na.rm = TRUE),
+      Min = min(post_total_score_prop, na.rm = TRUE),
+      Max = max(post_total_score_prop, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(post_total_score_prop)),
+      .groups = "drop"
+    )
+
+# change reference group to interactive
+df_MasterLong$condition <- as.factor(df_MasterLong$condition)
+df_MasterLong$condition <- factor(df_MasterLong$condition, levels = c("interactive", "human", "semi", "no"))
+
+# lmer
+model = lmer(z_post_total_score ~ condition + (1|id), data = df_MasterLong)
+summary(model)
+
+# lmer
+model = lmer(z_post_total_score ~ condition + (1|id) + age + QUILS_score + lens_score + gender + ethnicity, data = df_MasterLong)
+summary(model)
+```
+
+
+
+```{r}
+boxColors = c("#FF9843", "#7AA874", "#6096B4", "#D2D4D6")
+conditionLabels = c("Interactive", "Human", "Pseudo-interactive", "Non-interactive")
+```
+
+```{r}
+# Post
+ggplot(df_MasterLong, aes(x = condition, y = post_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score (in Percentage) by Condition",
+       x="Condition",
+       y="Post Test Total Score (in Percentage)") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+By Episode
+```{r}
+# Post
+ggplot(df_MasterLong, aes(x = condition, y = post_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score (in Percentage) by Condition and Episode",
+       x="Condition",
+       y="Post Test Total Score (in Percentage)") +
+  facet_wrap(~episode) +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(angle=45, color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+#### Delayed Post-test
+```{r}
+df_DelayedByCond <- df_MasterLong %>% 
+  filter(episode != 101) %>%
+  group_by(condition) %>%
+    summarise(
+      Mean = mean(delayed_total_score_prop, na.rm = TRUE),
+      SD = sd(delayed_total_score_prop, na.rm = TRUE),
+      Median = median(delayed_total_score_prop, na.rm = TRUE),
+      Min = min(delayed_total_score_prop, na.rm = TRUE),
+      Max = max(delayed_total_score_prop, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(delayed_total_score_prop)),
+      .groups = "drop"
+    )
+
+# lmer
+model = lmer(z_delayed_total_score ~ condition + (1|id), data = df_MasterLong)
+summary(model)
+```
+Total
+```{r}
+# Delayed
+boxColors = c("#FFAC14", "#8EBC88", "#74AAC8", "#E6E8EA")
+ggplot(df_MasterLong, aes(x = condition, y = delayed_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Delayed Post Test Score (in Percentage) by Condition",
+       x="Condition",
+       y="Delayed Post Test Total Score (in Percentage)") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+By Episode
+```{r}
+# Post
+ggplot(df_MasterLongMatched %>% filter(episode !=101), aes(x = condition, y = delayed_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Delayed Post-test Score (in Percentage) by Condition and Episode",
+       x="Condition",
+       y="Delayed Post-test Total Score (in Percentage)") +
+  facet_wrap(~episode) +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 12),
+        axis.text.x = element_text(angle=45, color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+## Investigate unbalanced baseline
+### Age
+```{r}
+# age
+## plot two overlapping histogram of age by group, add facet of dll
+ggplot(df_MasterWide, aes(x = age, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="Age by Group",
+       x="Age",
+       y="Count") +
+  facet_wrap(~site) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+Numbers
+```{r}
+# summarize mean, median, sd, min, max, N, na_count for age by group and site
+df_AgeByGroupSite = df_MasterWide %>% 
+  group_by(group, site) %>%
+    summarise(
+      Mean = mean(age, na.rm = TRUE),
+      SD = sd(age, na.rm = TRUE),
+      Median = median(age, na.rm = TRUE),
+      Min = min(age, na.rm = TRUE),
+      Max = max(age, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(age)),
+      .groups = "drop"
+    )
+
+model = lm(age ~ group*site, data = df_MasterWide)
+summary(model)
+```
+### MEFS
+```{r}
+# age
+## plot two overlapping histogram of age by group, add facet of dll
+ggplot(df_MasterWide, aes(x = MEFS_score, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  labs(title="MEFS by Group",
+       x="Age",
+       y="Count") +
+  facet_wrap(~site) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+Numbers
+```{r}
+# summarize mean, median, sd, min, max, N, na_count for age by group and site
+df_MEFSByGroupSite = df_MasterWide %>% 
+  group_by(group, site) %>%
+    summarise(
+      Mean = mean(MEFS_score, na.rm = TRUE),
+      SD = sd(MEFS_score, na.rm = TRUE),
+      Median = median(MEFS_score, na.rm = TRUE),
+      Min = min(MEFS_score, na.rm = TRUE),
+      Max = max(MEFS_score, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(MEFS_score)),
+      .groups = "drop"
+    )
+
+model = aov(MEFS_score ~ group*site, data = df_MasterWide)
+summary(model)
+
+model = aov(MEFS_score ~ group, data = df_MasterWide %>% filter(site == "elsol_delhi"))
+summary(model)
+```
+
+### Dropped-out kids
+```{r}
+## get df_RawTracker
+## remove the first row
+names(df_RawTracker) = as.character(unlist(df_RawTracker[1, ]))  # Set the first row as names
+df_RawTracker = df_RawTracker[-1, ]  # Remove the first row from the data
+
+## deal with duplicated columns in df_RawTracker
+df_RawTracker <- df_RawTracker[ , !duplicated(names(df_RawTracker))]
+
+# age
+# Ensure both dob are in Date format
+# convert dates
+dateCols = c("dob", "SWAN_date", "ep117_posttest_date", "ep109_posttest_date", "ep101_posttest_date", "QUILS_date", "LENS_date", "ToM_date")
+df_RawTracker[dateCols] = lapply(df_RawTracker[dateCols], function(x) as.Date(as.numeric(x), origin = "1899-12-30"))
+
+# Calculate age 
+df_RawTracker$age = as.numeric(df_RawTracker$SWAN_date - df_RawTracker$dob)/365.25
+df_RawTracker$age <- round(df_RawTracker$age, 2)
+
+## find ids in df_RawTracker that are not in df_MasterWide
+df_DroppedOut <- df_RawTracker %>% filter(!(id %in% df_MasterWide$id))
+
+# find num of rows where SWAN_date is not NA
+df_DroppedOut <- df_DroppedOut %>% filter(!is.na(QUILS_date))
+
+table(df_DroppedOut$condition, df_DroppedOut$location)
+
+# calculate age of dropped out kids
+df_DroppedOut$age = as.numeric(df_DroppedOut$QUILS_date - df_DroppedOut$dob)/365.25
+mean(df_DroppedOut$age, na.rm = TRUE)
+```
+
+### Resolve the unbalance
+Using Full data
+```{r}
+# check the unbalance before matching
+bal.tab(group ~ age + MEFS_score, data = df_MasterWideFull)
+
+# Use propensity score matching
+df_MasterWideFull$group <- as.factor(df_MasterWideFull$group)
+# Perform propensity score matching
+# The formula specifies that 'group' is the treatment and 'age' is the covariate
+# remove ids with missing MEFS
+psm_model <- matchit(group ~ age, data = df_MasterWideFull, method = "nearest", caliper = 0.3)
+
+# Create a matched data frame
+df_MasterWideFullMatched <- match.data(psm_model)
+
+print("Age After Matching")
+# check balance after matching
+bal.tab(psm_model)
+
+df_MatchedAgeByGroup = Summarize_By_Group(df_MasterWideFullMatched, "age")
+model = aov(age ~ group, data = df_MasterWideFullMatched)
+summary(model)
+
+df_MatchedMEFSByGroup = Summarize_By_Group(df_MasterWideFullMatched, "MEFS_score")
+model = aov(MEFS_score ~ group, data = df_MasterWideFullMatched)
+summary(model)
+
+
+table(df_MasterWideFullMatched$group)
+table(df_MasterWideFullMatched$group)
+```
+```{r}
+# find ids in df_MasterWide that are not in df_MasterWideMatched
+df_Unmatched <- df_MasterWide %>% filter(!(id %in% df_MasterWideMatched$id))
+
+print(df_Unmatched$id)
+print(table(df_Unmatched$group))
+```
+```{r}
+## remove unmatched ids from df_MasterLong
+df_MasterLongMatched <- df_MasterLong %>% filter(id %in% df_MasterWideMatched$id)
+```
+
+```{r}
+# write balanced data
+# write.csv(df_MasterLongMatched, "clean_data/processed_data/master_long_matched.csv", row.names = FALSE)
+# write.csv(df_MasterWideMatched, "clean_data/processed_data/master_wide_matched.csv", row.names = FALSE)
+```
+
+# BALANCED DATA
+## Load balanced data
+```{r}
+df_MasterLongMatched <- read.csv("clean_data/processed_data/master_long_matched.csv")
+df_MasterWideMatched <- read.csv("clean_data/processed_data/master_wide_matched.csv")
+```
+
+## Descriptive stats
+
+### Baseline summary
+```{r}
+print("Age")
+df_AgeByGroupBalanced = Summarize_By_Group(df_MasterWideMatched, "age")
+model = aov(age ~ group, data = df_MasterWideMatched)
+summary(model)
+
+print("QUILS")
+df_QUILSByGroupBalanced = Summarize_By_Group(df_MasterWideMatched, "QUILS_score")
+model = aov(QUILS_score ~ group, data = df_MasterWideMatched)
+summary(model)
+
+print("Lens")
+df_LensByGroupBalanced = Summarize_By_Group(df_MasterWideMatched, "lens_score")
+model = aov(lens_score ~ group, data = df_MasterWideMatched)
+summary(model)
+
+print("ToM")
+df_ToMByGroupBalanced = Summarize_By_Group(df_MasterWideMatched, "ToM_total_score")
+model = aov(ToM_total_score ~ group, data = df_MasterWideMatched)
+summary(model)
+
+print("MEFS")
+df_MefsByGroupBalanced = Summarize_By_Group(df_MasterWideMatched, "MEFS_score")
+model = aov(MEFS_score ~ group, data = df_MasterWideMatched)
+summary(model)
+
+print("Gender")
+tbl_GenderByGroup <- table(df_MasterWideMatched$gender, df_MasterWideMatched$group)
+print(tbl_GenderByGroup)
+model <- chisq.test(tbl_GenderByGroup)
+print(model)
+
+print("Ethnicity")
+tbl_EthnicityByGroup <- table(df_MasterWideMatched$ethnicity, df_MasterWideMatched$group)
+print(tbl_EthnicityByGroup)
+model <- chisq.test(tbl_EthnicityByGroup)
+print(model)
+```
+### Outcome summary
+#### Numbers
+```{r}
+# by condition and episode 
+df_PostByCondEp <- df_MasterLongMatched %>% 
+  group_by(condition, episode) %>%
+    summarise(
+      Mean = mean(post_total_score, na.rm = TRUE),
+      SD = sd(post_total_score, na.rm = TRUE),
+      Median = median(post_total_score, na.rm = TRUE),
+      Min = min(post_total_score, na.rm = TRUE),
+      Max = max(post_total_score, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(post_total_score)),
+      .groups = "drop"
+    )
+
+# anova
+model = aov(z_post_total_score ~ condition + Error(id), data = df_MasterLongMatched)
+summary(model)
+```
+
+```{r}
+df_DelayedByCondEp <- df_MasterLongMatched %>% 
+  filter(episode != 101) %>%
+  group_by(condition, episode) %>%
+    summarise(
+      Mean = mean(delayed_total_score, na.rm = TRUE),
+      SD = sd(delayed_total_score, na.rm = TRUE),
+      Median = median(delayed_total_score, na.rm = TRUE),
+      Min = min(delayed_total_score, na.rm = TRUE),
+      Max = max(delayed_total_score, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(delayed_total_score)),
+      .groups = "drop"
+    )
+
+# anova
+model = aov(z_delayed_total_score ~ condition + Error(id), data = df_MasterLongMatched)
+summary(model)
+```
+
+#### Visualize
+##### Post-test
+```{r}
+df_MasterLongMatched$condition <- factor(df_MasterLongMatched$condition, levels = c("interactive", "human", "semi", "no"))
+
+boxColors = c("#FF9843", "#7AA874", "#6096B4", "#D2D4D6")
+conditionLabels = c("Interactive", "Human", "Pseudo-interactive", "Non-interactive")
+```
+
+Total
+```{r}
+# Post
+ggplot(df_MasterLongMatched, aes(x = condition, y = post_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score (in Percentage) by Condition",
+       x="Condition",
+       y="Post Test Total Score (in Percentage)") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+By Episode
+```{r}
+# Post
+ggplot(df_MasterLongMatched, aes(x = condition, y = post_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score (in Percentage) by Condition and Episode",
+       x="Condition",
+       y="Post Test Total Score (in Percentage)") +
+  facet_wrap(~episode) +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(angle=45, color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+##### Investigate outlier
+```{r}
+
+```
+
+#### Delayed Post-test
+Total
+```{r}
+# Delayed
+boxColors = c("#FFAC14", "#8EBC88", "#74AAC8", "#E6E8EA")
+ggplot(df_MasterLongMatched, aes(x = condition, y = delayed_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Delayed Post Test Score (in Percentage) by Condition",
+       x="Condition",
+       y="Delayed Post Test Total Score (in Percentage)") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+By Episode
+```{r}
+# Post
+ggplot(df_MasterLongMatched %>% filter(episode !=101), aes(x = condition, y = delayed_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Delayed Post-test Score (in Percentage) by Condition and Episode",
+       x="Condition",
+       y="Delayed Post-test Total Score (in Percentage)") +
+  facet_wrap(~episode) +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 12),
+        axis.text.x = element_text(angle=45, color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+# Fit Models
+## Main effect
+### Impute missing data
+#### PMM
+```{r}
+# Subset useful columns
+df_MasterWideSubset <- df_MasterWideFull %>% select(id, gender, age, ethnicity, QUILS_score, MEFS_score, lens_score, ToM_total_score, pre_test_total_score, p117_total_score, d117_total_score, p109_total_score, d109_total_score, p101_total_score)
+
+
+# Perform PMM imputation
+df_ImputedPMMWide <- complete(mice(df_MasterWideSubset, method = "pmm", seed=77))
+
+# merge condition117, condition109, condition101 from df_MasterWideFull to df_ImputedPMMWide according to id
+df_ImputedPMMWide <- merge(df_ImputedPMMWide, df_MasterWideFull %>% select(id, condition117, condition109, condition101), by = "id")
+
+# Convert to long form
+df_ImputedPMMLong <- df_ImputedPMMWide %>%
+  pivot_longer(
+    cols = c(starts_with("condition"), matches("^[pd]\\d+")),  # Selecting condition and score columns
+    names_to = c(".value", "episode"),  # Split the column names into value and episode
+    names_pattern = "(^[a-z]+)(\\d+)",  # Pattern to split the column names (assumes all condition and score columns end with numbers)
+    values_to = c("condition", "total_score")  # Specify where the values should go
+  )
+
+df_ImputedPMMLong <- df_ImputedPMMLong %>% 
+  rename(post_total_score = p,
+         delayed_total_score = d)
+
+# set condition as a factor
+# make interactive the reference level
+df_ImputedPMMLong$condition <- factor(df_ImputedPMMLong$condition, levels = c("interactive", "human", "semi", "no"))
+
+m1 <- lmer(scale(post_total_score) ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + episode, data = df_ImputedPMMLong)
+summary(m1)
+
+```
+
+#### mice.impute.2l.continuous
+```{r}
+# check the pattern of missing data
+# make the label 45 degree
+md.pattern(df_MasterWideFull %>% select(MEFS_score, lens_score, ToM_total_score, pre_test_total_score, p117_total_score, d117_total_score, p109_total_score, d109_total_score, p101_total_score), rotate.names = TRUE)
+
+```
+
+
+```{r}
+df_MasterLongCleanSeshSubset <- df_MasterLongCleanSesh %>% select(id, condition, episode, age, gender, ethnicity, site, pre_test_total_score, lens_score, QUILS_score, ToM_total_score, MEFS_score, z_post_total_score, z_delayed_total_score)
+```
+
+Method 1
+```{r}
+imp <- mice.impute.2l.continuous(df_MasterLongCleanSeshSubset, m=, maxit=0, seed=418)
+
+fits <- with(data=imp_data, exp=lmer(z_post_total_score ~ (1|id) + condition + age + gender + MEFS_score + QUILS_score + ToM_total_score + lens_score + site + episode))
+
+summary(pool(fits))
+```
+
+```{r}
+ini <- mice(df_MasterLongCleanSesh_Post, maxit=0)
+pred <- ini$pred
+
+# Set fixed effects for each variable you're imputing
+variables_to_impute <- c("pre_test_total_score", "lens_score", "QUILS_score", "ToM_total_score", "MEFS_score", "z_post_total_score")
+
+# variables_to_impute <- c("MEFS_score", "z_post_total_score", "z_delayed_total_score")
+
+for (var in c("id", "condition", "episode", "age", "gender", "ethnicity", "site")) {
+  pred[var, ] <- 0
+}
+
+for (var in variables_to_impute) {
+  # Update the predictor settings for each variable
+  
+  pred[var, ] <- 1
+  pred[var, var] <- 0
+  pred[var, "id"] <- -2
+  
+  if (var %in% c("pre_test_total_score", "lens_score", "QUILS_score", "ToM_total_score", "MEFS_score")){
+    pred[var, "z_post_total_score"] <- 0
+  }
+}
+
+# perform imputation
+meth <- rep("", length(colnames(pred)))
+meth[colnames(pred) %in% variables_to_impute] <- "2l.norm"
+
+# Create 10 multiply imputed datasets
+
+imp_data <- mice(df_MasterLongCleanSesh_Post, method = meth, pred = pred, seed = 418, m = 2, print = FALSE)
+```
+
+```{r}
+fits <- with(data=imp_data, exp=lmer(z_post_total_score ~ (1|id) + condition + age + gender + MEFS_score + QUILS_score + ToM_total_score + lens_score + site + episode))
+
+summary(pool(fits))
+```
+
+
+
+#### Post-test
+```{r}
+## Main effect
+### Full
+df_MasterLongCleanSesh$condition <- factor(df_MasterLongCleanSesh$condition, levels = c("interactive", "human", "semi", "no"))
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + episode, data = df_MasterLongCleanSesh)
+summary(m1)
+
+# run a linear regression with clustered se for the main effect
+library(lmtest)
+library(sandwich)
+
+# Running the linear regression model
+model <- lm(z_post_total_score ~ condition+ episode, data = df_MasterLongCleanSesh)
+# Calculate clustered standard errors
+clustered_se <- vcovCL(model, cluster = ~ id)
+# Display the results with clustered standard errors
+coeftest(model, vcov = clustered_se)
+
+# ADD PRE TEst
+
+# Running the linear regression model
+model <- lm(z_post_total_score ~ condition+ episode + pre_test_total_score, data = df_MasterLongCleanSesh)
+# Calculate clustered standard errors
+clustered_se <- vcovCL(model, cluster = ~ id)
+
+# Display the results with clustered standard errors
+coeftest(model, vcov = clustered_se)
+
+
+# ADD DEMO
+# Running the linear regression model
+model <- lm(z_post_total_score ~ condition + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + site + episode, data = df_MasterLongCleanSesh)
+# Calculate clustered standard errors
+clustered_se <- vcovCL(model, cluster = ~ id)
+
+# Display the results with clustered standard errors
+coeftest(model, vcov = clustered_se)
+
+
+
+--------
+m0 <- lmer(z_post_total_score ~ condition + (1|id) + episode, data = df_MasterLongCleanSesh)
+summary(m0)
+
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + episode + pre_test_total_score, data = df_MasterLongCleanSesh)
+summary(m1)
+
+### Full but no outlier
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + site + episode, data = df_MasterLongFull %>% filter(!(z_QUILS_score < -2)))
+summary(m1)
+
+### Clean group
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + site + episode, data = df_MasterLongCleanGroup)
+summary(m1)
+
+### Clean group but no outlier
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + site + episode, data = df_MasterLongCleanGroup %>% filter(!(z_QUILS_score < -2)))
+summary(m1)
+
+### Clean session
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + site + episode, data = df_MasterLongCleanSesh)
+summary(m1)
+
+### Clean session but no QUILS outlier
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + age + gender + ethnicity + pre_test_total_score + lens_score + QUILS_score + ToM_total_score + MEFS_score + site + episode, data = df_MasterLongCleanSesh %>% filter(!(z_QUILS_score < -2)))
+summary(m1)
+```
+#### By episode
+```{r}
+df_117 <- df_MasterLongFull %>% filter(episode == 117)
+df_109 <- df_MasterLongFull %>% filter(episode == 109)
+df_101 <- df_MasterLongFull %>% filter(episode == 101)
+
+## Main effect
+m1_117 <- lm(z_post_total_score ~ condition + age + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score, data = df_117)
+summary(m1_117)
+
+m1_109 <- lm(z_post_total_score ~ condition + age + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score, data = df_109)
+summary(m1_109)
+
+m1_101 <- lm(z_post_total_score ~ condition + age + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score, data = df_101)
+summary(m1_101)
+```
+
+
+#### Interaction Effect
+```{r}
+## Interaction effect
+### condiiton x age
+m2 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*age, data = df_MasterLongMatched)
+summary(m2)
+
+### condiiton x gender
+m3 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*gender, data = df_MasterLongMatched)
+summary(m3)
+
+### condition x ethnicity - significant
+m4 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*ethnicity, data = df_MasterLongMatched)
+summary(m4)
+
+### condition x QUILS
+m5 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*QUILS_score, data = df_MasterLongMatched)
+summary(m5)
+
+### condition x lens - non-int marginally significant
+m5 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*lens_score, data = df_MasterLongMatched)
+summary(m5)
+
+### condition x MEFS
+m6 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*MEFS_score, data = df_MasterLongMatched)
+summary(m6)
+
+### condition x ToM
+m7 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score + condition*ToM_total_score, data = df_MasterLongMatched)
+summary(m7)
+```
+### Delayed Post-test
+```{r}
+m2 <- lmer(z_delayed_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score, data = df_MasterLongMatched)
+summary(m2)
+```
+
+
+
+# TEMPORARY HERE
+## Correlation between Swan and post_total_score for each condition
+```{r}
+# read master_long.csv
+df_MasterLong = read.csv("clean_data/master_long.csv")
+df_MasterWide <- read.csv("clean_data/master_wide.csv")
+
+# Calculate correlation between Swan and post_total_score for each condition
+swan_post_cor <- df_MasterLong %>%
+  group_by(condition) %>%
+  summarize(correlation = cor(swan_score, post_total_score, use = "complete.obs"))
+
+swan_post_cor <- df_MasterLong %>%
+  group_by(condition) %>%
+  summarize(correlation = cor(swan_score, age, use = "complete.obs"))
+
+
+swan_post_cor <- df_MasterWide %>%
+  summarize(correlation = cor(swan_score, age, use = "complete.obs"))
+
+# test the significance
+cor.test(df_MasterWide$swan_score, df_MasterWide$age, method = "pearson")
+```
+
+```{r}
+standardization <- function(df_MasterLong) {
+  # Define the maximum scores for each episode
+  max_scores <- c('117' = 34, '109' = 25, '101' = 22)
+  
+  # Standardizing scores within df_MasterLong
+  df_MasterLong <- df_MasterLong %>%
+    group_by(episode) %>%
+    mutate(
+      z_post_total_score = as.vector(scale(post_total_score)),
+      z_delayed_total_score = as.vector(scale(delayed_total_score))
+    ) %>%
+    ungroup()
+  
+  return(df_MasterLong)
+}
+
+df_MasterLong <- standardization(df_MasterLong)
+
+# set interactive as the reference group
+df_MasterLong$condition <- as.factor(df_MasterLong$condition)
+df_MasterLong$condition <- relevel(df_MasterLong$condition, ref = "interactive")
+
+m <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score, data = df_MasterLong)
+summary(m)
+# get R-squared
+r.squaredGLMM(m)
+
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + swan_score, data = df_MasterLong)
+summary(m1)
+# get R-squared
+r.squaredGLMM(m1)
+
+
+m3 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + condition*swan_score, data = df_MasterLong)
+summary(m3)
+```
+
+
+# ----DIVIDER--------------------------------------------------------------
+## Remove Outliers
+```{r}
+# standardize QUILS and lens_score, using df_MasterWideBalanced
+df_MasterWideBalanced$z_QUILS_score = as.vector(scale(df_MasterWideBalanced$QUILS_score))
+df_MasterWideBalanced$z_lens_score = as.vector(scale(df_MasterWideBalanced$lens_score))
+
+# merge z_QUILS_score and z_lens_score to df_MasterLongBalanced by id
+df_MasterLongBalanced = merge(df_MasterLongBalanced, df_MasterWideBalanced %>% select(id, z_QUILS_score, z_lens_score), by = "id")
+
+# compute z score for each episode, use mutate() for df_MasterLongBalanced
+df_MasterLongBalanced = df_MasterLongBalanced %>%
+  group_by(episode) %>%
+  mutate(z_post_total_score = as.vector(scale(post_total_score)),
+         z_delayed_total_score = as.vector(scale(delayed_total_score))) %>%
+  ungroup()
+```
+
+```{r}
+# find ids whose z_post_total_score and z_QUILS_score are smaller than -2
+df_Outliers <- df_MasterLongBalanced %>% filter(z_post_total_score < -2 & z_QUILS_score < -2)
+
+df_OutliersPrint <- df_Outliers %>% select(id, group, condition, episode, z_QUILS_score, z_lens_score, z_post_total_score, z_delayed_total_score)
+
+# remove ids in df_Outliers from df_MasterLongBalanced
+df_MasterLongNoOutliers <- df_MasterLongBalanced %>% filter(!id %in% df_Outliers$id)
+
+# remove ids in df_Outliers from df_MasterWideBalanced
+df_MasterWideNoOutliers <- df_MasterWideBalanced %>% filter(!id %in% df_Outliers$id)
+
+# write
+# write.csv(df_MasterLongNoOutliers, "clean_data/processed_data/master_long_no_outliers.csv", row.names = FALSE)
+# write.csv(df_MasterWideNoOutliers, "clean_data/processed_data/master_wide_no_outliers.csv", row.names = FALSE)
+```
+
+# ANALYTICAL SAMPLE
+## Load data
+```{r}
+df_MasterLongNoOutliers = read.csv("clean_data/processed_data/master_long_no_outliers.csv")
+df_MasterWideNoOutliers = read.csv("clean_data/processed_data/master_wide_no_outliers.csv")
+```
+
+## Check condition counts
+```{r}
+# by group
+table(df_MasterWideNoOutliers$group)
+
+# by condition
+unique_participants <- df_MasterLongNoOutliers %>%
+  group_by(id, condition) %>%
+  summarize(
+    age = first(age),
+    gender = first(gender),
+    ethnicity = first(ethnicity),
+    QUILS_score = first(QUILS_score),
+    lens_score = first(lens_score),
+    ToM_total_score = first(ToM_total_score),
+    MEFS_score = first(MEFS_score),
+    .groups = 'drop'
+  )
+
+table(unique_participants$condition)
+```
+
+## Baseline Summary by group
+```{r}
+# function
+Summarize_By_Group <- function(data, parameter) {
+  # Ensure the parameter is a string and exists in the dataframe
+  if (!is.character(parameter) || !(parameter %in% names(data))) {
+    stop("Parameter should be a column name in the data frame.")
+  }
+
+  # Dynamically specify the column to summarize using the rlang package for tidy evaluation
+  parameter_sym <- rlang::sym(parameter)
+
+  return(data %>%
+    group_by(group) %>%
+    summarise(
+      Mean = mean(!!parameter_sym, na.rm = TRUE),
+      SD = sd(!!parameter_sym, na.rm = TRUE),
+      Median = median(!!parameter_sym, na.rm = TRUE),
+      Min = min(!!parameter_sym, na.rm = TRUE),
+      Max = max(!!parameter_sym, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(!!parameter_sym))
+    ))
+}
+```
+
+```{r}
+print("Age")
+df_AgeByGroup = Summarize_By_Group(df_MasterWideNoOutliers, "age")
+model = aov(age ~ group, data = df_MasterWideNoOutliers)
+summary(model)
+
+print("QUILS")
+df_QUILSByGroup = Summarize_By_Group(df_MasterWideNoOutliers, "QUILS_score")
+model = aov(QUILS_score ~ group, data = df_MasterWideNoOutliers)
+summary(model)
+
+print("Lens")
+df_LensByGroup = Summarize_By_Group(df_MasterWideNoOutliers, "lens_score")
+model = aov(lens_score ~ group, data = df_MasterWideNoOutliers)
+summary(model)
+
+print("ToM")
+df_ToMByGroup = Summarize_By_Group(df_MasterWideNoOutliers, "ToM_total_score")
+model = aov(ToM_total_score ~ group, data = df_MasterWideNoOutliers)
+summary(model)
+
+print("MEFS")
+df_MefsByGroup = Summarize_By_Group(df_MasterWideNoOutliers, "MEFS_score")
+model = aov(MEFS_score ~ group, data = df_MasterWideNoOutliers)
+summary(model)
+
+print("Gender")
+tbl_GenderByGroup <- table(df_MasterWideNoOutliers$gender, df_MasterWideNoOutliers$group)
+print(tbl_GenderByGroup)
+model <- chisq.test(tbl_GenderByGroup)
+print(model)
+
+print("Ethnicity")
+tbl_EthnicityByGroup <- table(df_MasterWideNoOutliers$ethnicity, df_MasterWideNoOutliers$group)
+print(tbl_EthnicityByGroup)
+model <- chisq.test(tbl_EthnicityByGroup)
+print(model)
+```
+
+
+## Outcome Summary by condition
+```{r}
+df_117NoOutliers = df_MasterLongNoOutliers %>% filter(episode == 117)
+df_109NoOutliers = df_MasterLongNoOutliers %>% filter(episode == 109)
+df_101NoOutliers = df_MasterLongNoOutliers %>% filter(episode == 101)
+```
+
+### Post-test
+Numbers
+```{r}
+## summarize post_total_score by condition and episode
+df_PostByCondEp <- df_MasterLongNoOutliers %>% 
+  group_by(condition, episode) %>%
+    summarise(
+      Mean = mean(post_total_score, na.rm = TRUE),
+      SD = sd(post_total_score, na.rm = TRUE),
+      Median = median(post_total_score, na.rm = TRUE),
+      Min = min(post_total_score, na.rm = TRUE),
+      Max = max(post_total_score, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(post_total_score)),
+      .groups = "drop"
+    )
+```
+
+ANOVA for each episode
+```{r}
+# anova for post_total_score for episode 117
+print("Ep 117")
+model = aov(post_total_score ~ condition + Error(id), data = df_117NoOutliers)
+summary(model)
+
+# anova for post_total_score for episode 109
+print("Ep 109")
+model = aov(post_total_score ~ condition + Error(id), data = df_109NoOutliers)
+summary(model)
+
+# anova for post_total_score for episode 101
+print("Ep 101")
+model = aov(post_total_score ~ condition + Error(id), data = df_101NoOutliers)
+summary(model)
+```
+
+Distribution
+```{r}
+# check whether post_total_score for 117 is normally distributed
+print("Ep 117")
+skewness(df_117NoOutliers$post_total_score)
+kurtosis(df_117NoOutliers$post_total_score)
+
+# check whether post_total_score for 109 is normally distributed
+print("Ep 109")
+skewness(na.omit(df_109NoOutliers$post_total_score))
+kurtosis(na.omit(df_109NoOutliers$post_total_score))
+
+# check whether post_total_score for 101 is normally distributed
+print("Ep 101")
+skewness(na.omit(df_101NoOutliers$post_total_score))
+kurtosis(na.omit(df_101NoOutliers$post_total_score))
+```
+
+### Delayed Post-test
+Numbers
+```{r}
+## summarize post_total_score by condition and episode
+df_DelayedByCondEp <- df_MasterLongNoOutliers %>% 
+  filter(episode != 101) %>% 
+  group_by(condition, episode) %>%
+    summarise(
+      Mean = mean(delayed_total_score, na.rm = TRUE),
+      SD = sd(delayed_total_score, na.rm = TRUE),
+      Median = median(delayed_total_score, na.rm = TRUE),
+      Min = min(delayed_total_score, na.rm = TRUE),
+      Max = max(delayed_total_score, na.rm = TRUE),
+      N = n(),
+      NA_count = sum(is.na(delayed_total_score)),
+      .groups = "drop"
+    )
+```
+
+ANOVA for each episode
+```{r}
+# anova for post_total_score for episode 117
+print("Ep 117")
+model = aov(delayed_total_score ~ condition + Error(id), data = df_117NoOutliers)
+summary(model)
+
+# anova for post_total_score for episode 109
+print("Ep 109")
+model = aov(delayed_total_score ~ condition + Error(id), data = df_109NoOutliers)
+summary(model)
+
+```
+
+Distribution
+```{r}
+# check whether delayed_total_score for 117 is normally distributed
+print("Ep 117")
+skewness(na.omit(df_117NoOutliers$delayed_total_score))
+kurtosis(na.omit(df_117NoOutliers$delayed_total_score))
+
+# check whether delayed_total_score for 109 is normally distributed
+print("Ep 109")
+skewness(na.omit(df_109NoOutliers$delayed_total_score))
+kurtosis(na.omit(df_109NoOutliers$delayed_total_score))
+```
+
+
+# Fit Models
+
+```{r}
+# set the reference group of df_MasterLongNoOutliers as interactive
+df_MasterLongNoOutliers$condition <- as.factor(df_MasterLongNoOutliers$condition)
+df_MasterLongNoOutliers$condition <- relevel(df_MasterLongNoOutliers$condition, ref = "interactive")
+```
+
+## Post-test
+### Main effect
+```{r}
+# fit a linear mixed model for post_total_score
+m1 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score, data = df_MasterLongMatched)
+summary(m1)
+```
+### Interaction
+```{r}
+m2 <- lmer(z_post_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + condition*MEFS_score, data = df_MasterLongNoOutliers)
+summary(m2)
+```
+## Delayed Post-test
+```{r}
+# fit a linear mixed model for delayed_total_score
+m1 <- lmer(z_delayed_total_score ~ condition + (1|id) + gender + ethnicity + lens_score + QUILS_score + ToM_total_score + MEFS_score, data = df_MasterLongNoOutliers)
+summary(m1)
+```
+
+
+
+
+# DIVIDER: BELOW ARE OLD ANALYSES
+
+## Process variables
+```{r}
+# convert to factor
+df_Master$condition <- factor(df_Master$condition, levels = c("interactive", "human", "semi", "no"))
+df_Master$gender <- factor(df_Master$gender, levels = c("male", "female"))
+df_Master$ethnicity <- factor(df_Master$ethnicity, levels = c("hispanic", "notHispanic"))
+
+# Create dummy variables for condition
+df_Master$interactive = ifelse(df_Master$condition == "interactive", 1, 0)
+df_Master$human = ifelse(df_Master$condition == "human", 1, 0)
+df_Master$semi = ifelse(df_Master$condition == "semi", 1, 0)
+df_Master$no = ifelse(df_Master$condition == "no", 1, 0)
+```
+
+
+
+```{r}
+# in df_Master, for rows where gender or ethnicity is missing, look for their values in df_ImputedMissingBaseline
+# if found, fill in the missing values in df_Master
+df_Master$gender = ifelse(is.na(df_Master$gender), df_ImputedMissingBaseline$gender, df_Master$gender)
+df_Master$ethnicity = ifelse(is.na(df_Master$ethnicity), df_ImputedMissingBaseline$ethnicity, df_Master$ethnicity)
+
+```
+
+
+<!-- ## filter out cases when wrong condition was given -->
+<!-- - episode 117 -->
+<!--   - 3453, human was given, should be interactive -->
+<!--   - 3684, interactive was given, should be semi -->
+<!--   - 3687, interactive was given, should be human -->
+<!--   - 3719, no was given, should be interactive -->
+
+<!-- - episode 109 -->
+<!--   - 3469, human was given, should be no -->
+<!--   - 3260, interactive was given, should be semi -->
+
+<!-- - episode 101 -->
+<!--   - 3469, no was given, should be human -->
+<!-- ```{r} -->
+<!-- # delete cases when wrong condition was given -->
+<!-- df_Master = df_Master %>% filter(!(id == 3453 & episode == 117) &  -->
+<!--                                  !(id == 3684 & episode == 117) &  -->
+<!--                                  !(id == 3687 & episode == 117) &  -->
+<!--                                  !(id == 3719 & episode == 117) &  -->
+<!--                                  !(id == 3469 & episode == 109) &  -->
+<!--                                  !(id == 3260 & episode == 109) &  -->
+<!--                                  !(id == 3469 & episode == 101)) -->
+
+<!-- ``` -->
+
+## Normalize scores
+```{r}
+df_MasterFiltered$condition <- as.factor(df_MasterFiltered$condition)
+df_MasterFiltered$condition <- relevel(df_MasterFiltered$condition, ref = "interactive")
+```
+
+### Standardize
+#### Learning scores
+```{r}
+df_MasterFiltered <- df_MasterFiltered %>%
+  group_by(episode) %>%
+  mutate(z_post_total_score = as.vector(scale(post_total_score)),
+         z_delayed_total_score = as.vector(scale(delayed_total_score))) %>%
+  ungroup()
+```
+
+### By percentage
+```{r}
+# create a new column called post_total_score_prop
+# if episode == 117, post_total_score_prop = post_total_score / 34
+# if episode == 109, post_total_score_prop = post_total_score / 25
+# if episode == 101, post_total_score_prop = post_total_score / 22
+
+df_MasterFiltered$post_total_score_prop = ifelse(df_MasterFiltered$episode==117, df_MasterFiltered$post_total_score/34, 
+                                   ifelse(df_MasterFiltered$episode==109, df_MasterFiltered$post_total_score/25,
+                                          ifelse(df_MasterFiltered$episode==101, df_MasterFiltered$post_total_score/22, NA)))
+
+
+# do the same for delayed_total_score_prop
+df_MasterFiltered$delayed_total_score_prop = ifelse(df_MasterFiltered$episode==117, df_MasterFiltered$delayed_total_score/34, 
+                                   ifelse(df_MasterFiltered$episode==109, df_MasterFiltered$delayed_total_score/25,
+                                          ifelse(df_MasterFiltered$episode==101, df_MasterFiltered$delayed_total_score/22, NA)))
+```
+
+```{r}
+df_109 = df_MasterFiltered %>% filter(episode == 109)
+df_117 = df_MasterFiltered %>% filter(episode == 117)
+df_101 = df_MasterFiltered %>% filter(episode == 101)
+
+```
+
+## Exclude uneligble id
+### SEARCH FOR SIGNIFICANCE BY EPISODE
+```{r}
+# 117
+df_117_filtered = df_117 %>% filter(!(id %in% c(3451, 3719, 3335, 3429, 3673, 3445, 3273, 3413, 3272, 3408, 3469)))
+
+## regression
+model <- lm(z_post_total_score ~ condition + lens_score + QUILS_score + age + gender + ethnicity, data = df_117_filtered)
+summary(model)
+
+
+## using FIML to compute missing values
+model_spec <- 'z_post_total_score ~ semi + human + no + lens_score + QUILS_score + age + gender + ethnicity'
+fit <- sem(model_spec, data = df_117_filtered, missing = "fiml")
+summary(fit)
+
+# 109
+df_109_filtered = df_109 %>% filter(!(id %in% c(3451, 3445, 3413, 3673, 3335, 3272, 3344, 3273, 3408, 3436, 3260)))
+
+## regression
+model <- lm(z_post_total_score ~ condition + lens_score + QUILS_score + age + gender + ethnicity + ToM_total_score, data = df_109_filtered)
+summary(model)
+plot(model)
+
+## using FIML to compute missing values
+model_spec <- 'z_post_total_score ~ semi + human + no + lens_score + QUILS_score + age + gender + ethnicity'
+fit <- sem(model_spec, data = df_109_filtered, missing = "fiml")
+summary(fit)
+
+# boxplot of post_total_score by condition for df_109_filtered
+ggplot(df_109_filtered, aes(x = condition, y = post_total_score)) +
+  geom_boxplot() +
+  labs(title="Post Test Score by Condition for Episode 109",
+       x="Condition",
+       y="Post Test Total Score") +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+
+# 101
+df_101_filtered = df_101 %>% filter(!(id %in% c(3451, 3673, 3272, 3413, 3429, 3448, 3273, 3335, 3445, 3456, 3344)))
+model <- lm(z_post_total_score ~ condition + lens_score + QUILS_score + age + gender + ethnicity, data = df_101_filtered)
+summary(model)
+
+## using FIML to compute missing values
+model_spec <- 'z_post_total_score ~ semi + human + no + lens_score + QUILS_score + age + gender + ethnicity'
+fit <- sem(model_spec, data = df_101_filtered, missing = "fiml")
+summary(fit)
+
+# combine three filtered df
+df_Master_Filtered = rbind(df_117_filtered, df_109_filtered, df_101_filtered)
+
+
+model <- lmer(log(z_post_total_score+1) ~ condition + (1 | id) + gender + lens_score + QUILS_score+ ethnicity, data = df_Master)
+summary(model)
+```
+
+```{r}
+# compute age
+# Assume df_Master_Filtered is your dataframe and it is already loaded
+# Calculate the linear regression model only on the rows where both Age and QUILS_score are present
+model <- lm(age ~ QUILS_score, data = df_Master_Filtered, na.action = na.exclude)
+
+# Summarize the model to get the coefficients
+summary(model)
+
+# Predict the missing age values based on QUILS_score
+df_Master_Filtered_Age_Imputed <- df_Master_Filtered %>%
+  mutate(age = ifelse(is.na(age), predict(model, newdata = df_Master_Filtered), age))
+
+model <- lmer(log(z_post_total_score+1) ~ condition + (1 | id)  + lens_score + QUILS_score + age + ethnicity + gender, data = df_Master_Filtered_Age_Imputed)
+summary(model)
+```
+
+
+
+# Descriptive Analysis
+## Descriptive by condition
+### Numbers
+```{r}
+# Calculate descriptive statistics for post_total_score
+descriptive_stats_post <- df_Master %>%
+  group_by(condition) %>%
+  summarise(
+    mean_post_score_prop = mean(post_total_score_prop, na.rm = TRUE),
+    sd_post_score_prop = sd(post_total_score_prop, na.rm = TRUE),
+    median_post_score_prop = median(post_total_score_prop, na.rm = TRUE),
+    min_post_score_prop = min(post_total_score_prop, na.rm = TRUE),
+    max_post_score_prop = max(post_total_score_prop, na.rm = TRUE),
+    n = n(),
+    na_count = sum(is.na(post_total_score_prop))
+  )
+
+# Print the results for post_total_score
+print(descriptive_stats_post)
+
+## Ep 117
+descriptive_stats_post_117 <- df_117 %>%
+  group_by(condition) %>%
+  summarise(
+    mean_post_score_prop = mean(post_total_score, na.rm = TRUE),
+    sd_post_score_prop = sd(post_total_score, na.rm = TRUE),
+    median_post_score_prop = median(post_total_score, na.rm = TRUE),
+    min_post_score_prop = min(post_total_score, na.rm = TRUE),
+    max_post_score_prop = max(post_total_score, na.rm = TRUE),
+    n = n(),
+    na_count = sum(is.na(post_total_score))
+  )
+
+# Print the results for post_total_score
+print(descriptive_stats_post_117)
+
+## Ep 109
+descriptive_stats_post_109 <- df_109 %>%
+  group_by(condition) %>%
+  summarise(
+    mean_post_score_prop = mean(post_total_score, na.rm = TRUE),
+    sd_post_score_prop = sd(post_total_score, na.rm = TRUE),
+    median_post_score_prop = median(post_total_score, na.rm = TRUE),
+    min_post_score_prop = min(post_total_score, na.rm = TRUE),
+    max_post_score_prop = max(post_total_score, na.rm = TRUE),
+    n = n(),
+    na_count = sum(is.na(post_total_score))
+  )
+
+# Print the results for post_total_score
+print(descriptive_stats_post_109)
+
+## Ep 101
+descriptive_stats_post_101 <- df_101 %>%
+  group_by(condition) %>%
+  summarise(
+    mean_post_score_prop = mean(post_total_score, na.rm = TRUE),
+    sd_post_score_prop = sd(post_total_score, na.rm = TRUE),
+    median_post_score_prop = median(post_total_score, na.rm = TRUE),
+    min_post_score_prop = min(post_total_score, na.rm = TRUE),
+    max_post_score_prop = max(post_total_score, na.rm = TRUE),
+    n = n(),
+    na_count = sum(is.na(post_total_score))
+  )
+
+# Print the results for post_total_score
+print(descriptive_stats_post_101)
+```
+
+```{r}
+# ANOVA for each episode
+anova_post_117 <- aov(post_total_score ~ condition, data = df_117)
+summary(anova_post_117)
+
+anova_post_109 <- aov(post_total_score ~ condition, data = df_109)
+summary(anova_post_109)
+
+anova_post_101 <- aov(post_total_score ~ condition, data = df_101)
+summary(anova_post_101)
+
+```
+
+
+```{r}
+# If needed, repeat for delayed_total_score
+descriptive_stats_delayed <- df_Master %>%
+  group_by(condition) %>%
+  summarise(
+    mean_delayed_score_prop = mean(delayed_total_score_prop, na.rm = TRUE),
+    sd_delayed_score_prop = sd(delayed_total_score_prop, na.rm = TRUE),
+    median_delayed_score_prop = median(delayed_total_score_prop, na.rm = TRUE),
+    min_delayed_score_prop = min(delayed_total_score_prop, na.rm = TRUE),
+    max_delayed_score_prop = max(delayed_total_score_prop, na.rm = TRUE),
+    n = n(),
+    na_count = sum(is.na(delayed_total_score_prop))
+  )
+
+# Print the results for delayed_total_score
+print(descriptive_stats_delayed)
+
+```
+
+### Visuals
+```{r}
+df_Master$condition <- factor(df_Master$condition, levels = c("interactive", "human", "semi", "no"))
+
+boxColors = c("#FF9843", "#7AA874", "#6096B4", "#D2D4D6")
+conditionLabels = c("Interactive", "Human", "Pseudo-interactive", "Non-interactive")
+```
+
+```{r}
+# Post
+ggplot(df_Master, aes(x = condition, y = post_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score by Condition",
+       x="Condition",
+       y="Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+# Delayed
+boxColors = c("#FFAC14", "#8EBC88", "#74AAC8", "#E6E8EA")
+ggplot(df_Master, aes(x = condition, y = delayed_total_score_prop, fill = condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Delayed Post Test Score by Condition",
+       x="Condition",
+       y="Delayed Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+### Check outliers
+Z-score
+```{r}
+df_Master$QUILS_z_score = scale(df_Master$QUILS_score)[,1]
+lowQuils = df_Master %>% filter(QUILS_z_score < -2)
+
+outliers = lowQuils %>% distinct(id, group)
+print(outliers)
+```
+## Remove low QUILS outlier
+```{r}
+# remove ids in outliers
+df_MasterNoOutlier = df_Master %>% filter(!id %in% outliers$id)
+```
+
+```{r}
+# check if ids in outliers are in df_MasterNoOutlier
+lowQuils %>% filter(id %in% df_MasterNoOutlier$id)
+```
+
+## Correlation between Baseline and Learn Score
+```{r}
+# correlation between Quils, lens, ToM, MEFS and post_total_score
+# show significance level
+
+cor.test(df_Master$QUILS_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+cor.test(df_Master$lens_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+cor.test(df_Master$ToM_total_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+cor.test(df_Master$ToM_tech_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+cor.test(df_Master$ToM_nature_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+cor.test(df_Master$ToM_animal_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+
+cor.test(df_Master$MEFS_score, df_Master$post_total_score, use="complete.obs", method = "pearson")
+
+```
+
+
+
+## Regression
+### Full data
+```{r}
+# relevel df_MasterFiltered, so interactive is the reference level
+
+
+model <- lmer(z_post_total_score ~ condition + QUILS_score + lens_score + (1 | id) + gender, data = df_MasterFiltered)
+summary(model)
+
+model <- lm(z_post_total_score ~ condition, data = df_117)
+summary(model)
+
+model <- lm(z_post_total_score ~ condition, data = df_109)
+summary(model)
+
+model <- lm(z_post_total_score ~ condition, data = df_101)
+summary(model)
+
+
+model <- lmer(z_delayed_total_score ~ condition + QUILS_score + lens_score + (1 | id) + gender + ethnicity , data = df_Master)
+summary(model)
+
+
+
+df_Master_Filtered <- df_Master %>%
+  filter(!(condition == "interactive" & z_post_total_score < -2))
+
+model <- lmer(z_post_total_score ~ condition + QUILS_score + lens_score + (1 | id) + gender + ethnicity, data = df_Master_Filtered)
+summary(model)
+
+
+
+
+```
+
+
+
+```{r}
+# Assuming df_long is your data frame
+df_MasterNoOutlier$condition <- factor(df_MasterNoOutlier$condition, levels = c("interactive", "human", "semi", "no"))
+
+
+model_post <- lmerTest::lmer(scale(post_total_score_prop) ~ condition + (1 | id) + age + gender + ethnicity + lens_score + QUILS_score + ToM_score + MEFS_score, data = df_MasterNoOutlier)
+summary(model_post)
+r2_values <- r.squaredGLMM(model_post)
+print(r2_values)
+
+
+model_delayed <- lmer(scale(delayed_total_score_prop) ~ condition + (1 | id) + gender + ethnicity + MEFS_score + ToM_score + QUILS_score + lens_score, data = df_MasterNoOutlier)
+summary(model_delayed)
+```
+
+
+## Descriptive by episode
+### Visual
+```{r}
+
+boxColors = c("#FF9843", "#7AA874", "#6096B4", "#D2D4D6")
+conditionLabels = c("Interactive", "Human", "Pseudo-interactive", "Non-interactive")
+
+# POST
+
+# check post 117 by condition
+df_Master$condition117 = factor(df_Master$condition117, levels = c("interactive", "no", "semi", "human"))
+ggplot(df_Master, aes(x=condition117, y=p117_total_score, fill=condition117)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score for Video 1 (Molting) by Condition",
+       x="",
+       y="Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# check post 109 by condition
+ggplot(df_Master, aes(x=condition109, y=p109_total_score, fill=condition109)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score for Video 2 (Aerodymanics) by Condition",
+       x="",
+       y="Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# check post 101 by condition
+ggplot(df_Master, aes(x=condition101, y=p101_total_score, fill=condition101)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Post Test Score for Video 3 (Viscosity) by Condition",
+       x="",
+       y="Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# DELAYED
+# check post 117 by condition
+ggplot(df_Master, aes(x=condition117, y=d117_total_score, fill=condition117)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="First Delayed Post Test Score (Episode 117) by Condition",
+       x="",
+       y="Delayed Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+
+# check post 109 by condition
+ggplot(df_Master, aes(x=condition109, y=d109_total_score, fill=condition109)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  labs(title="Second Delayed Post Test Score (Episode 109) by Condition",
+       x="",
+       y="Delayed Post Test Total Score") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+```
+
+### Summary Stats by episode
+```{r}
+summary_Post117 = aggregate(data=df_Master, p117_total_score ~ condition117, FUN = summary)
+summary_Post109 = aggregate(data=df_Master, p109_total_score ~ condition109, FUN = summary)
+summary_Post101 = aggregate(data=df_Master, p101_total_score ~ condition101, FUN = summary)
+
+summary_Delayed117 = aggregate(data=df_Master, d117_total_score ~ condition117, FUN = summary)
+summary_Delayed109 = aggregate(data=df_Master, d109_total_score ~ condition109, FUN = summary)
+
+```
+
+
+## Long form data
+```{r}
+# generate proportional measures
+
+
+# retrieve columns of interest
+df_Long = df_Master %>% dplyr::select(id, group, age, gender, ethnicity, eng_prof, condition117, condition109, condition101, p117_total_score, d117_total_score, p109_total_score, d109_total_score, p101_total_score)
+
+# pivot longer for condition for each episode
+df_Long = df_Long %>%
+  pivot_longer(
+    cols = starts_with("condition"),
+    names_to = "episode",
+    values_to = "condition",
+    names_prefix = "condition"
+  ) 
+
+# create a column for post-test score
+df_Long = df_Long %>%
+  mutate(post_total_score = case_when(
+    episode == "117" ~ p117_total_score,
+    episode == "109" ~ p109_total_score,
+    episode == "101" ~ p101_total_score,
+    TRUE ~ NA_real_  # This line handles cases where episode does not match any of the specified, assigning NA
+  ))
+
+# create a column for delayed score
+df_Long = df_Long %>%
+  mutate(delayed_total_score = case_when(
+    episode == "117" ~ d117_total_score,
+    episode == "109" ~ d109_total_score,
+    TRUE ~ NA_real_  # This line handles cases where episode does not match any of the specified, assigning NA
+  ))
+
+# remove d and p score
+df_Long = subset(df_Long, select = -c(p117_total_score, d117_total_score, p109_total_score, d109_total_score, p101_total_score))
+```
+
+### Descriptive Stats by condition
+```{r}
+## generate proportional scores
+df_Long$post_score_prop = ifelse(df_Long$episode==117, df_Long$post_total_score/26, 
+                                 ifelse(df_Long$episode==109, df_Long$post_total_score/14,
+                                        ifelse(df_Long$episode==101, df_Long$post_total_score/22, NA)))
+
+df_Long$delayed_score_prop = ifelse(df_Long$episode==117, df_Long$delayed_total_score/26, 
+                                 ifelse(df_Long$episode==109, df_Long$delayed_total_score/14,
+                                        ifelse(df_Long$episode==101, df_Long$delayed_total_score/22, NA)))
+
+summary_PostPropCondition = aggregate(data=df_Long, post_score_prop ~ condition, FUN=summary)
+summary_DelayedPropCondition = aggregate(data=df_Long, delayed_score_prop ~ condition, FUN=summary)
+```
+
+Visualize
+```{r}
+boxColors = c("#FF9843", "#7AA874", "#6096B4", "#D2D4D6")
+conditionLabels = c("Interactive", "Human", "Pseudo-interactive", "Non-interactive")
+
+# POST
+df_Long$condition = factor(df_Long$condition, levels = c("interactive", "no", "semi", "human"))
+ggplot(df_Long, aes(x=condition, y=post_score_prop, fill=condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  # stat_summary(fun.y = mean, geom = "crossbar", width = 0.1, color = "red", size=1.2, fatten = 0, aes(ymin = ..y.., ymax = ..y..), show.legend = F) +
+  labs(title="Post-test Performance by Condition",
+       x="",
+       y="Post-test Accuracy Rate") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  #scale_y_continuous(limits = c(0, 25), oob = scales::rescale_none) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# DELAYED
+df_Long$condition = factor(df_Long$condition, levels = c("interactive", "no", "semi", "human"))
+ggplot(df_Long, aes(x=condition, y=delayed_score_prop, fill=condition)) +
+  geom_violin(width=0.8, adjust= 0.8, show.legend = FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="#BF3131", fill="#BF3131") +
+  scale_y_continuous(limits = c(0, 1), oob = scales::rescale_none) +
+  labs(title="Delayed Post-test Performance by Condition",
+       x="",
+       y="Delayed Post-test Accuracy Rate") +
+  scale_fill_manual(values=boxColors, labels=conditionLabels) + 
+  scale_x_discrete(labels=conditionLabels) +
+  theme_bw() +
+  theme(text=element_text(size = 14),
+        axis.text.x = element_text(color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+```
+
+
+
+### Mixed-effects model
+```{r}
+fit <- lmer(post_score_prop ~ condition + (1|id) + (1|episode) + age + eng_prof + eng_prof*condition, data = df_Long)
+summary(fit)
+```
+
+<!-- Generate aggregate score for interactive -->
+<!-- ```{r} -->
+<!-- df_Agg = df_Analysis %>% group_by(id, condition) %>%  -->
+<!--   summarise(agg_post_score = mean(post_total_score, na.rm=T), -->
+<!--             agg_delayed_score = mean(delayed_total_score, na.rm=T), -->
+<!--             .groups="drop") -->
+
+<!-- # check dup rows -->
+<!-- dupRows <- df_Agg %>% -->
+<!--   group_by(id, condition) %>% -->
+<!--   filter(n() > 1) %>% -->
+<!--   ungroup() -->
+
+<!-- print(dupRows) -->
+
+<!-- # merge covariates -->
+<!-- df_Agg = merge(df_Agg, df_Tracker[, c("id", "age", "gender", "ethnicity", "eng_prof")], by=c("id"), all.x=T) -->
+
+
+<!-- ## aggregate by condition -->
+<!-- df_Analysis %>% group_by(id, condition, age, gender, ethnicity, eng_prof, ) -->
+<!-- ``` -->
+
+
+#### ANOVA
+```{r}
+# ANOVA
+model = aov(data=df_Agg, agg_post_score ~ condition + age + gender + ethnicity + eng_prof)
+summary(model)
+
+TukeyHSD(model, which = "condition")
+```
+
+#### Regression
+```{r}
+df_Agg$condition = factor(df_Agg$condition)
+df_Agg$condition <- relevel(df_Agg$condition, ref = "interactive")
+model = lm(data = df_Agg, scale(agg_post_score) ~ condition + age + gender + ethnicity)
+summary(model)
+```
+
+## Remove five outliers from interactive
+```{r}
+# remove 5 outliers from interactive
+df_Interactive <- df_Agg[df_Agg$condition == "interactive", ]
+df_InteractiveOrdered <- df_Interactive[order(df_Interactive$agg_post_score), ]
+
+# Step 3: Identify the rows of the last five agg_post_score values
+rows_to_remove <- head(df_InteractiveOrdered, 5)
+
+# Step 4: Remove these rows from the original dataframe
+df_AggFiltered <- df_Agg[!rownames(df_Agg) %in% rownames(rows_to_remove), ]
+
+```
+
+Visual
+```{r}
+df_AggFiltered$condition = factor(df_AggFiltered$condition, levels=c("interactive", "semi", "no", "human"))
+
+ggplot(df_AggFiltered, aes(x=condition, y=scale(agg_post_score), fill=condition)) +
+  geom_boxplot() +
+  labs(title="Boxplot of Post by Condition",
+       x="Condition",
+       y="Post Total Score") +
+  theme_minimal()
+
+
+ggplot(df_AggFiltered, aes(x=condition, y=scale(agg_delayed_score), fill=condition)) +
+  geom_boxplot() +
+  labs(title="Boxplot of Delayed Post by Condition",
+       x="Condition",
+       y="Post Total Score") +
+  theme_minimal()
+
+```
+
+### ANOVA
+```{r}
+# post
+model = aov(data=df_AggFiltered, agg_post_score ~ condition + age + gender + ethnicity)
+summary(model)
+
+TukeyHSD(model, which = "condition")
+
+# delayed
+model = aov(data=df_AggFiltered, agg_delayed_score ~ condition + age + gender + ethnicity + eng_prof)
+summary(model)
+
+TukeyHSD(model, which = "condition")
+
+```
+
+## Regression
+```{r}
+# post
+df_AggFiltered$condition = factor(df_AggFiltered$condition)
+df_AggFiltered$condition <- relevel(df_AggFiltered$condition, ref = "interactive")
+model = lm(data = df_AggFiltered, scale(agg_post_score) ~ condition + age + gender + ethnicity + eng_prof)
+summary(model)
+
+# delayex
+df_AggFiltered$condition = factor(df_AggFiltered$condition)
+df_AggFiltered$condition <- relevel(df_AggFiltered$condition, ref = "interactive")
+model = lm(data = df_AggFiltered, scale(agg_delayed_score) ~ condition + age + gender + ethnicity + eng_prof)
+summary(model)
+```
+
+```{r}
+df_Analysis$condition = factor(df_Analysis$condition, levels = c("interactive", "semi", "no", "human"))
+model <- lmer(scale(post_total_score) ~ condition + gender + age + ethnicity + eng_prof + (1|id), data = df_Analysis)
+summary(model)
+```
+
+```{r}
+df_test = df_Master %>% dplyr::select(id, age, gender, ethnicity, eng_prof, condition117, condition109, condition101, p117_total_score, p109_total_score, p101_total_score)
+df_test$condition117 = factor(df_test$condition117, levels=c("interactive", "semi", "no", "human"))
+df_test$condition109 = factor(df_test$condition109, levels=c("interactive", "semi", "no", "human"))
+df_test$condition101 = factor(df_test$condition101, levels=c("interactive", "semi", "no", "human"))
+
+model = lm(data=df_test, p117_total_score ~ condition117 + age + gender + ethnicity + eng_prof)
+summary(model)
+
+model = lm(data=df_test, p109_total_score ~ condition109 + age + gender + ethnicity + eng_prof)
+summary(model)
+
+model = lm(data=df_test, p101_total_score ~ condition101 + age + gender + ethnicity + eng_prof)
+summary(model)
+```

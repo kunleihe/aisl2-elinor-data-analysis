@@ -46,7 +46,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Episode 109 post and delayed
 - 109 post: 
-  - id 3395 3397 3398 3399 3396 3403, completed 109 post, but not in tracker. their start dates were 2022-11-01, 2022-11-03, 2022-11-08. **Was this before the shut down? Yes**
+  - id 3395 3397 3398 3399 3396 3403, completed 109 post, but not in tracker. their start dates were 2022-11-01, 2022-11-03, 2022-11-08. **This was this before the shut down? **
   - [dup] 3425 KH should be 3426
   - [dup] 3437 and 3278 with later dates should be moved to df_Delayed109
   
@@ -55,14 +55,31 @@ knitr::opts_chunk$set(echo = TRUE)
   - id 3717 did not give delayed bc previous session did not administer post test (technical difficulties)
 
 ## Episode 101 post
-- id "3397" "3395" "3399" "3398" "3396" "3400" "3392" "3388" "3382" "3389" "3403" "3390" "3398" "3399" "3356" "3396" "3401" "3334" "3362" "3358" "3402", completed 101 post, but not in the tracker. Their session 1 started in 2022/11 **Was this before the shut down? Yes**
+- id "3397" "3395" "3399" "3398" "3396" "3400" "3392" "3388" "3382" "3389" "3403" "3390" "3398" "3399" "3356" "3396" "3401" "3334" "3362" "3358" "3402", completed 101 post, but not in the tracker. Their session 1 started in 2022/11 **this was before the shut down**
 - [dup] 3399, 3398, 3396 have dups and both rows should be removed
 - [dup] 3289 and 3681 with earlier time should be removed
 
-# Quils
-Duplicated rows:
+# Baseline
+## age
+- 2017-08-09 was a fake bday, should be NA
 
-- "3321" "3321" "3335" "3335" "3342" "3342" "3344" "3344" "3394" "3718" "0"    "0"    "3394" "3718" -- keep those with later dates. Earlier dates were done before the shutdown
+## gender
+- El Sol kids gender was missing in tracker, but available via MEFS data
+
+## Quils
+Duplicated rows:
+- Kiran compiled scores (20250509, source file in G-Drive)
+- Scores are in Ch. 9 in the QUILS User Manual
+- "3321" "3321" "3335" "3335" "3342" "3342" "3344" "3344" "3394" "3718" "0"    "0"    "3394" "3718" -- keep those dup rows with later dates. Earlier dates were done before the shutdown
+
+## LENS
+- Kiran compiled scores (20250509, source file in G-Drive)
+
+## MEFS
+- Eight kids do not have MEFS. 3465 3468 3469 3470 3348 3304 3289 3696
+## ToM
+- Kiran compiled scores (20250509, source file in G-Drive)
+- Rubrics: The 4-point scale was coded as No (0), Yes-a little bit (1), Yes-medium amount (2), and Yes-a lot (3)
 
 # Naming convention for post test
 - episode number
@@ -86,11 +103,11 @@ Notes:
 # Post-test Scoring
 ## Episode 117 post and delayed 
 Scores:
-
-- Full score for non CR items: 26 points
+- Full score: 34 points
+  - non CR items: 26 points
+  - CR item: 8 points
 
 Notes:
-
 - q2: probably needs human review. As long as they mention one of the three great things, considered correct.
 - q9: do kids have to use "molt" in order to be correct at the initial level? (yes for prelim analysis) - No, conceptually
 - q13: is "tight" or "small" correct for initial level (no for prelim analysis): Yes
@@ -98,8 +115,10 @@ Notes:
 
 ## Episode 109 post and delayed 
 Scores
+- Full score: 28 points
+  - non CR items: 16 points
+  - CR items: 12 points
 
-- Full score for non CR items: 14 points
 
 Notes:
 
@@ -117,7 +136,44 @@ Notes:
   - q4: is slimy, gooey or *slow* correct? (slimy and gooey considered correct for prelim analysis, not slow) 
   - q6: ketchup + synonyms of goopy
   - q7: same as above
+  
+# Data Analysis
+## Low quils outlier
+An outlier is defined as those children who have a QUILS Z-score lower than -2
+- 3273 3413 3437 3451 3673 3691
+- noCA CA noCA CA CA noCA
 
-# Baseline
-## TOM
-- Rubrics: The 4-point scale was coded as No (0), Yes-a little bit (1), Yes-medium amount (2), and Yes-a lot (3)
+## Identify unusual sessions in the tracker
+### CA group
+#### Ep 117
+- 3273; spoke Spanish
+- 3719; failed practice two times
+- 3446; failed practice three times
+- 3673, refused to practice
+
+#### Ep 109
+- 3413; failed the practice three times
+- 3443; refused to participate
+- 3273; spoke Spanish
+- 3761; translate answers from Spanish to English
+- 3673; refused to participate
+- 3681; video volume issues
+
+#### Ep 101
+- 3719; failed practice twice
+
+### noCA group
+- 3464; spoke Spanish
+- 3672; not understood English
+
+#### Ep 117
+- 3684, 3687; gave interactive, needs to be excluded
+
+#### Ep 109
+- 3260; gave interactive, needs to be excluded for 109 and 101
+
+#### Ep 101
+- 
+
+
+
