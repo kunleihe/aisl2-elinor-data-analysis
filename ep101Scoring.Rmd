@@ -1,0 +1,501 @@
+---
+title: "Scoring immediate post-test for ep 101"
+author: "Kunlei He"
+date: "2024-10-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Libraries
+```{r}
+library(dplyr)
+```
+
+# Load Data
+```{r}
+# Raw score downloaded from Qualtrics
+df_RawPost101 <- read.csv("raw_data/raw_post_101.csv")
+
+# Tracker
+df_Tracker <- read.csv("clean_data/tracker.csv")
+```
+
+# Data Cleaning
+## Clean columns and ids
+```{r}
+# remove unuseful columns
+df_Post101 = df_RawPost101[, -c(2:17)]
+
+# remove first two rows
+df_Post101 = df_Post101[-c(1:2), ]
+
+# get the id. Notice the id and ra names are mixed in some cases
+df_Post101$id = ifelse(df_Post101$Intro_4 %in% c(3000:4000), df_Post101$Intro_4, df_Post101$Intro_5)
+# get the ra initials
+df_Post101$ra = ifelse(is.na(as.numeric(as.character(df_Post101$Intro_4))), df_Post101$Intro_4, df_Post101$Intro_5)
+# get rid of intro_4 and intro_5
+df_Post101 = df_Post101 %>% dplyr::select(-Intro_4, -Intro_5)
+# rearrange columns
+df_Post101 = df_Post101 %>% dplyr::select(id, ra, everything())
+
+# remove testing ids
+df_Post101 = df_Post101 %>%  filter(id %in% c(3000:4000))
+
+# find elements in df_Post101$id that are NOT present in df_Tracker$id
+diffID = df_Post101$id[!df_Post101$id %in% df_Tracker$id]
+print(diffID) # check with Kelsy - These are pre shutdown ids
+```
+
+## Rename columns
+```{r}
+colNames101 = c("id", "ra" , "start_date",
+                "q1_drink_init_choice", "q1_drink_init_text", "q1_drink_rpt_choice", "q1_drink_rpt_text",
+                "q2_nectar_init_choice", "q2_nectar_init_text", "q2_nectar_rpt_choice", "q2_nectar_rpt_text",
+                "q3_wings_init_choice", "q3_wings_init_text", "q3_wings_rpt_choice", "q3_wings_rpt_text",
+                "q4_goopy_init_choice", "q4_goopy_init_text", "q4_goopy_rpt_choice", "q4_goopy_rpt_text",
+                "q5_wait_init_choice", "q5_wait_init_text", "q5_wait_rpt_choice", "q5_wait_rpt_text",
+                "q6_line_init_choice", "q6_line_init_text", "q6_line_rpt_choice", "q6_line_rpt_text",
+                "q7_out_init_choice", "q7_out_init_text", "q7_out_rpt_choice", "q7_out_rpt_text",
+                "q8_jar_init_choice", "q8_jar_init_text", "q8_jar_rpt_choice", "q8_jar_rpt_text",
+                "q9a_goopier_init_choice", "q9a_goopier_init_text", "q9b_runnier_init_choice", "q9b_runnier_init_text",
+                "q10_add_init_choice", "q10_add_init_text", "q10_add_rpt_choice", "q10_add_rpt_text",
+                "q11_next_init_choice", "q11_next_init_text", "q11_next_rpt_choice", "q11_next_rpt_text",
+                
+                # vocab
+                "q12a_vocab_cr", "q12b_vocab_init_choice", 
+                "q13a_vocab_init_choice", "q13b_vocab_init_choice", "q13c_vocab_init_choice", "q13d_vocab_init_choice",
+                "q14a_vocab_init_choice", "q14b_vocab_init_choice", "q14c_vocab_init_choice", 
+                "notes")
+
+# rename
+colnames(df_Post101) = colNames101
+# convert id to be numeric
+df_Post101$id = as.numeric(df_Post101$id)
+```
+
+## Handle duplicated ids
+```{r}
+dupRows_Post101 <- df_Post101 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post101)
+```
+
+```{r}
+# 3399, 3398, 3396 have dups and both rows should be removed
+df_Post101 = df_Post101 %>% filter(id!=3399 & id!=3398 & id!=3396)
+
+# 3289 and 3681 with earlier time should be removed
+## Identify the rows with ids 3430 and 3278 with the earliest dates
+rows_to_move <- df_Post101 %>%
+  filter(id %in% c(3289, 3681)) %>%
+  group_by(id) %>%
+  slice_min(order_by = start_date) %>%
+  ungroup()
+
+# remove these rows from df_Post101
+df_Post101 <- df_Post101 %>%
+  anti_join(rows_to_move, by = c("id", "start_date"))
+
+
+# check duplicated rows again
+dupRows_Post101 <- df_Post101 %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+print(dupRows_Post101)
+```
+
+# Scoring
+- Full score for episode 101 items is 22 (no constructive items, not including vocabulary items)
+- Full score for vocabulary items is 8 points
+
+## Individual items
+### Content
+#### q1_drink
+```{r}
+Func_q1_drink_score <- function(df) {
+  df$q1_drink_init_score = ifelse(grepl("nectar", df$q1_drink_init_choice, ignore.case = TRUE), 2,
+                                         ifelse(grepl("nectar", df$q1_drink_init_text, ignore.case = TRUE), 2, 0))
+
+  df$q1_drink_rpt_score = ifelse(grepl("nectar", df$q1_drink_rpt_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("nectar", df$q1_drink_rpt_text, ignore.case = TRUE), 1, 0))
+
+  df$q1_drink_rpt_score = ifelse(df$q1_drink_init_score == 2, 0, df$q1_drink_rpt_score)
+  
+  df$q1_drink_score = df$q1_drink_init_score + df$q1_drink_rpt_score
+  
+  print(paste("The range of q1_drink_score is:", 
+              min(df$q1_drink_score, na.rm = TRUE), "to", 
+              max(df$q1_drink_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q1_drink_score(df_Post101)
+```
+
+#### q2_nectar
+```{r}
+Func_q2_nectar_score <- function(df) {
+  df$q2_nectar_init_score = ifelse(grepl("water", df$q2_nectar_init_choice, ignore.case = TRUE), 2,
+                                         ifelse(grepl("water", df$q2_nectar_init_text, ignore.case = TRUE), 2, 0))
+
+  df$q2_nectar_rpt_score = ifelse(grepl("water", df$q2_nectar_rpt_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("water", df$q2_nectar_rpt_text, ignore.case = TRUE), 1, 0))
+
+  df$q2_nectar_rpt_score = ifelse(df$q2_nectar_init_score == 2, 0, df$q2_nectar_rpt_score)
+  
+  df$q2_nectar_score = df$q2_nectar_init_score + df$q2_nectar_rpt_score
+  
+  print(paste("The range of q2_nectar_score is:", 
+              min(df$q2_nectar_score, na.rm = TRUE), "to", 
+              max(df$q2_nectar_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q2_nectar_score(df_Post101)
+```
+
+#### q3_wings
+```{r}
+Func_q3_wings_score <- function(df) {
+  df$q3_wings_init_score = ifelse((grepl("wing", df$q3_wings_init_choice, ignore.case = TRUE) & grepl("use|flap", df$q3_wings_init_choice, ignore.case = TRUE)) | 
+                                 (grepl("wing", df$q3_wings_init_text, ignore.case = TRUE) & grepl("use|flap", df$q3_wings_init_text, ignore.case = TRUE)), 2, 0)
+
+  df$q3_wings_rpt_score = ifelse((grepl("wing", df$q3_wings_rpt_choice, ignore.case = TRUE) & grepl("use|flap", df$q3_wings_rpt_choice, ignore.case = TRUE)) | 
+                                 (grepl("wing", df$q3_wings_rpt_text, ignore.case = TRUE) & grepl("use|flap", df$q3_wings_rpt_text, ignore.case = TRUE)), 1, 0)
+
+
+  df$q3_wings_rpt_score = ifelse(df$q3_wings_init_score == 2, 0, df$q3_wings_rpt_score)
+  
+  df$q3_wings_score = df$q3_wings_init_score + df$q3_wings_rpt_score
+  
+  print(paste("The range of q3_wings_score is:", 
+              min(df$q3_wings_score, na.rm = TRUE), "to", 
+              max(df$q3_wings_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q3_wings_score(df_Post101)
+```
+
+#### q4_goopy
+```{r}
+Func_q4_goopy_score <- function(df) {
+  df$q4_goopy_init_score = ifelse(grepl("thick|sticky|slimy|gooey", df$q4_goopy_init_choice, ignore.case = TRUE), 2,
+                                         ifelse(grepl("thick|sticky|slimy|gooey", df$q4_goopy_init_text, ignore.case = TRUE), 2, 0))
+
+  df$q4_goopy_rpt_score = ifelse(grepl("thick|sticky|slimy|gooey", df$q4_goopy_rpt_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("thick|sticky|slimy|gooey", df$q4_goopy_rpt_text, ignore.case = TRUE), 1, 0))
+
+  df$q4_goopy_rpt_score = ifelse(df$q4_goopy_init_score == 2, 0, df$q4_goopy_rpt_score)
+  
+  df$q4_goopy_score = df$q4_goopy_init_score + df$q4_goopy_rpt_score
+  
+  print(paste("The range of q4_goopy_score is:", 
+              min(df$q4_goopy_score, na.rm = TRUE), "to", 
+              max(df$q4_goopy_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q4_goopy_score(df_Post101)
+```
+
+#### q5_wait
+```{r}
+Func_q5_wait_score <- function(df) {
+  df$q5_wait_init_score = ifelse(grepl("ketchup", df$q5_wait_init_choice, ignore.case = TRUE), 2,
+                                         ifelse(grepl("ketchup", df$q5_wait_init_text, ignore.case = TRUE), 2, 0))
+
+  df$q5_wait_rpt_score = ifelse(grepl("ketchup", df$q5_wait_rpt_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("ketchup", df$q5_wait_rpt_text, ignore.case = TRUE), 1, 0))
+
+  df$q5_wait_rpt_score = ifelse(df$q5_wait_init_score == 2, 0, df$q5_wait_rpt_score)
+  
+  df$q5_wait_score = df$q5_wait_init_score + df$q5_wait_rpt_score
+  
+  print(paste("The range of q5_wait_score is:", 
+              min(df$q5_wait_score, na.rm = TRUE), "to", 
+              max(df$q5_wait_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q5_wait_score(df_Post101)
+```
+
+#### q6_line
+```{r}
+Func_q6_line_score <- function(df) {
+  texture_patterns <- "thick|sticky|slimy|gooey"
+  not_out_patterns <- "not.*out|n['’]t.*out"
+  
+   df$q6_line_init_score = ifelse((grepl("ketchup", df$q6_line_init_choice, ignore.case = TRUE) & grepl(paste0(texture_patterns, "|", not_out_patterns), df$q6_line_init_choice, ignore.case = TRUE)) | 
+                                 (grepl("ketchup", df$q6_line_init_text, ignore.case = TRUE) & grepl(paste0(texture_patterns, "|", not_out_patterns), df$q6_line_init_text, ignore.case = TRUE)), 
+                                 2, 0)
+
+  df$q6_line_rpt_score = ifelse((grepl("ketchup", df$q6_line_rpt_choice, ignore.case = TRUE) & grepl(paste0(texture_patterns, "|", not_out_patterns), df$q6_line_rpt_choice, ignore.case = TRUE)) | 
+                                 (grepl("ketchup", df$q6_line_rpt_text, ignore.case = TRUE) & grepl(paste0(texture_patterns, "|", not_out_patterns), df$q6_line_rpt_text, ignore.case = TRUE)), 
+                                 1, 0)
+
+  # Condition to set repeat score to 0 if initial score is 2
+  df$q6_line_rpt_score = ifelse(df$q6_line_init_score == 2, 0, df$q6_line_rpt_score)
+  
+  # Combine initial and repeat scores
+  df$q6_line_score = df$q6_line_init_score + df$q6_line_rpt_score
+  
+  # Print the range of scores
+  print(paste("The range of q6_line_score is:", 
+              min(df$q6_line_score, na.rm = TRUE), "to", 
+              max(df$q6_line_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q6_line_score(df_Post101)
+```
+#### q7_out
+```{r}
+Func_q7_out_score <- function(df) {
+  df$q7_out_init_score = ifelse(grepl("thick|sticky|slimy|gooey", df$q7_out_init_choice, ignore.case = TRUE), 2,
+                                         ifelse(grepl("thick|sticky|slimy|gooey", df$q7_out_init_text, ignore.case = TRUE), 2, 0))
+
+  df$q7_out_rpt_score = ifelse(grepl("thick|sticky|slimy|gooey", df$q7_out_rpt_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("thick|sticky|slimy|gooey", df$q7_out_rpt_text, ignore.case = TRUE), 1, 0))
+
+  df$q7_out_rpt_score = ifelse(df$q7_out_init_score == 2, 0, df$q7_out_rpt_score)
+  
+  df$q7_out_score = df$q7_out_init_score + df$q7_out_rpt_score
+  
+  print(paste("The range of q7_out_score is:", 
+              min(df$q7_out_score, na.rm = TRUE), "to", 
+              max(df$q7_out_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q7_out_score(df_Post101)
+```
+#### q8_jar
+```{r}
+Func_q8_jar_score <- function(df) {
+  df$q8_jar_init_score = ifelse(grepl("honey", df$q8_jar_init_choice, ignore.case = TRUE), 2,
+                                         ifelse(grepl("honey", df$q8_jar_init_text, ignore.case = TRUE), 2, 0))
+
+  df$q8_jar_rpt_score = ifelse(grepl("honey", df$q8_jar_rpt_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("honey", df$q8_jar_rpt_text, ignore.case = TRUE), 1, 0))
+
+  df$q8_jar_rpt_score = ifelse(df$q8_jar_init_score == 2, 0, df$q8_jar_rpt_score)
+  
+  df$q8_jar_score = df$q8_jar_init_score + df$q8_jar_rpt_score
+  
+  print(paste("The range of q8_jar_score is:", 
+              min(df$q8_jar_score, na.rm = TRUE), "to", 
+              max(df$q8_jar_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q8_jar_score(df_Post101)
+```
+
+#### q9_video
+- consist of q9a_goopier and q9b_runnier
+```{r}
+Func_q9_video_score <- function(df) {
+  df$q9a_goopier_init_score = ifelse(grepl("A", df$q9a_goopier_init_choice), 1,
+                                         ifelse(grepl("A", df$q9a_goopier_init_text), 1, 0))
+
+  df$q9b_runnier_init_score = ifelse(grepl("B", df$q9b_runnier_init_choice), 1,
+                                         ifelse(grepl("B", df$q9b_runnier_init_text), 1, 0))
+
+  df$q9_video_score = df$q9a_goopier_init_score + df$q9b_runnier_init_score
+  
+  print(paste("The range of q9_video_score is:", 
+              min(df$q9_video_score, na.rm = TRUE), "to", 
+              max(df$q9_video_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q9_video_score(df_Post101)
+```
+
+#### q10_add
+```{r}
+Func_q10_add_score <- function(df) {
+  df$q10_add_init_score = ifelse((grepl("water", df$q10_add_init_choice, ignore.case = TRUE) & grepl("get|put|use|add", df$q10_add_init_choice, ignore.case = TRUE)) | 
+                                 (grepl("water", df$q10_add_init_text, ignore.case = TRUE) & grepl("get|put|use|add", df$q10_add_init_text, ignore.case = TRUE)), 2, 0)
+
+  df$q10_add_rpt_score = ifelse((grepl("water", df$q10_add_rpt_choice, ignore.case = TRUE) & grepl("get|put|use|add", df$q10_add_rpt_choice, ignore.case = TRUE)) | 
+                                 (grepl("water", df$q10_add_rpt_text, ignore.case = TRUE) & grepl("get|put|use|add", df$q10_add_rpt_text, ignore.case = TRUE)), 1, 0)
+
+
+  df$q10_add_rpt_score = ifelse(df$q10_add_init_score == 2, 0, df$q10_add_rpt_score)
+  
+  df$q10_add_score = df$q10_add_init_score + df$q10_add_rpt_score
+  
+  print(paste("The range of q10_add_score is:", 
+              min(df$q10_add_score, na.rm = TRUE), "to", 
+              max(df$q10_add_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q10_add_score(df_Post101)
+```
+
+#### q11_next
+```{r}
+Func_q11_next_score <- function(df) {
+  df$q11_next_init_score = ifelse((grepl("water", df$q11_next_init_choice, ignore.case = TRUE) & grepl("more", df$q11_next_init_choice, ignore.case = TRUE)) | 
+                                 (grepl("water", df$q11_next_init_text, ignore.case = TRUE) & grepl("more", df$q11_next_init_text, ignore.case = TRUE)), 2, 0)
+
+  df$q11_next_rpt_score = ifelse((grepl("water", df$q11_next_rpt_choice, ignore.case = TRUE) & grepl("more", df$q11_next_rpt_choice, ignore.case = TRUE)) | 
+                                 (grepl("water", df$q11_next_rpt_text, ignore.case = TRUE) & grepl("more", df$q11_next_rpt_text, ignore.case = TRUE)), 1, 0)
+
+
+  df$q11_next_rpt_score = ifelse(df$q11_next_init_score == 2, 0, df$q11_next_rpt_score)
+  
+  df$q11_next_score = df$q11_next_init_score + df$q11_next_rpt_score
+  
+  print(paste("The range of q11_next_score is:", 
+              min(df$q11_next_score, na.rm = TRUE), "to", 
+              max(df$q11_next_score, na.rm = TRUE)))
+  
+  return (df)
+}
+
+df_Post101 <- Func_q11_next_score(df_Post101)
+```
+
+### Vocabulary PENDING
+```{r}
+Func_vocab_score <- function(df) {
+
+  return (df)
+}
+```
+
+## Aggregate scores PENDING
+```{r}
+# Aggregate all the columns that contain init_score to be free_recall_score
+df_Post101$p101_init_total_score = rowSums(df_Post101[, grepl("init_score", colnames(df_Post101))], na.rm = TRUE)
+
+# Aggregate all the columns that contain rpt_score to be reprompt_score
+df_Post101$p101_rpt_total_score = rowSums(df_Post101[, grepl("rpt_score", colnames(df_Post101))], na.rm = TRUE)
+
+# Aggregate all item score to be total_score
+df_Post101$p101_total_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q3_wings_score", 
+                                                "q4_goopy_score", "q5_wait_score", "q6_line_score", "q7_out_score", 
+                                                "q8_jar_score", "q9_video_score", "q10_add_score", "q11_next_score")], na.rm = TRUE)
+
+# Calculate recall and transfer score
+## recall items: q1, q2, q3, q4, q5, q6, q10
+## transfer items: q7, q8, q9, q11
+df_Post101$p101_recall_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q3_wings_score", 
+                                                "q4_goopy_score", "q5_wait_score", "q6_line_score", "q10_add_score")],
+                               na.rm = TRUE)
+
+df_Post101$p101_transfer_score = rowSums(df_Post101[, c("q7_out_score", "q8_jar_score", "q9_video_score", "q11_next_score")], 
+                               na.rm = TRUE)
+
+# Calculate narrative and science score
+## narrative items: q3, q5
+## science items: all remaining items
+df_Post101$p101_narrative_score = rowSums(df_Post101[, c("q3_wings_score", "q5_wait_score")], na.rm = TRUE)
+df_Post101$p101_science_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q4_goopy_score", 
+                                                "q6_line_score", "q7_out_score", "q8_jar_score", 
+                                                "q9_video_score", "q10_add_score", "q11_next_score")], na.rm = TRUE)
+
+# Sanity check
+df_Post101$p101_total_score_check = df_Post101$p101_init_total_score + df_Post101$p101_rpt_total_score
+
+## check if there are rows where total_score and total_score_check are different
+print(df_Post101 %>% filter(p101_total_score != p101_total_score_check))
+
+## remove total_score_check column
+df_Post101 <- df_Post101 %>% select(-p101_total_score_check)
+```
+
+# Write to file
+```{r}
+write.csv(df_Post101, "clean_data/post_101_scored.csv", row.names = FALSE)
+```
+
+# Psychometric Analysis
+Metrics: 
+- difficulty = (mean score / total score per item) * 100
+  - problematic if less than 0.2 or greater than 0.8
+- discrimination =  the correlation between the item score and the total score without that item for each child
+  - problematic if less than 0.2
+  
+```{r}
+# Load the data
+# df_Post101 <- read.csv("clean_data/post_101_scored.csv")
+
+# List of score columns
+scoreCols <- c("q1_drink_score", "q2_nectar_score", "q3_wings_score", 
+               "q4_goopy_score", "q5_wait_score", "q6_line_score", 
+               "q7_out_score", "q8_jar_score", "q9_video_score", 
+               "q10_add_score", "q11_next_score")
+
+# Full score for all items
+fullScore <- 2
+
+# Calculate total score for discrimination (sum of all items per respondent)
+totalScorePerChild <- rowSums(df_Post101[scoreCols], na.rm = TRUE)
+
+# Create an empty dataframe to store the results with the same number of rows as scoreCols
+df_Post101_Psy <- data.frame(item = scoreCols, difficulty = numeric(length(scoreCols)), 
+                             discrimination = numeric(length(scoreCols)),
+                             difficulty_problematic = character(length(scoreCols)), 
+                             discrimination_problematic = character(length(scoreCols)), 
+                             overall_problematic = character(length(scoreCols)), 
+                             stringsAsFactors = FALSE)
+
+# Loop through each score column
+for (i in seq_along(scoreCols)) {
+  col <- scoreCols[i]
+  
+  # Calculate difficulty
+  meanScore <- mean(df_Post101[[col]], na.rm = TRUE)
+  difficulty <- round(meanScore / fullScore, 2)
+  
+  # Check if difficulty is problematic
+  difficulty_problematic <- ifelse(difficulty < 0.2 | difficulty > 0.8, "problematic", "satisfactory")
+  
+  # Calculate discrimination
+  # Remove the current column from the total score for discrimination calculation
+  totalWithoutItem <- totalScorePerChild - df_Post101[[col]]
+  
+  # Calculate the correlation between the item score and total score without that item
+  discrimination <- cor(df_Post101[[col]], totalWithoutItem, use = "complete.obs")
+  
+  # Check if discrimination is problematic
+  discrimination_problematic <- ifelse(discrimination < 0.2, "problematic", "satisfactory")
+  
+  # 4. Combine the two problems (either difficulty or discrimination is problematic)
+  overall_problematic <- ifelse(difficulty_problematic == "problematic" | discrimination_problematic == "problematic", 
+                                "problematic", "satisfactory")
+  
+  # 5. Store results in the pre-allocated dataframe
+  df_Post101_Psy$difficulty[i] <- difficulty
+  df_Post101_Psy$discrimination[i] <- discrimination
+  df_Post101_Psy$difficulty_problematic[i] <- difficulty_problematic
+  df_Post101_Psy$discrimination_problematic[i] <- discrimination_problematic
+  df_Post101_Psy$overall_problematic[i] <- overall_problematic
+}
+
+```
+
