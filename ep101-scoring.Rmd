@@ -387,7 +387,7 @@ Func_vocab_score <- function(df) {
 }
 ```
 
-## Aggregate scores PENDING
+## Aggregate scores
 ```{r}
 # Aggregate all the columns that contain init_score to be free_recall_score
 df_Post101$p101_init_total_score = rowSums(df_Post101[, grepl("init_score", colnames(df_Post101))], na.rm = TRUE)
@@ -395,29 +395,31 @@ df_Post101$p101_init_total_score = rowSums(df_Post101[, grepl("init_score", coln
 # Aggregate all the columns that contain rpt_score to be reprompt_score
 df_Post101$p101_rpt_total_score = rowSums(df_Post101[, grepl("rpt_score", colnames(df_Post101))], na.rm = TRUE)
 
+
+
 # Aggregate all item score to be total_score
 df_Post101$p101_total_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q3_wings_score", 
                                                 "q4_goopy_score", "q5_wait_score", "q6_line_score", "q7_out_score", 
                                                 "q8_jar_score", "q9_video_score", "q10_add_score", "q11_next_score")], na.rm = TRUE)
 
-# Calculate recall and transfer score
-## recall items: q1, q2, q3, q4, q5, q6, q10
-## transfer items: q7, q8, q9, q11
-df_Post101$p101_recall_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q3_wings_score", 
-                                                "q4_goopy_score", "q5_wait_score", "q6_line_score", "q10_add_score")],
-                               na.rm = TRUE)
-
-df_Post101$p101_transfer_score = rowSums(df_Post101[, c("q7_out_score", "q8_jar_score", "q9_video_score", "q11_next_score")], 
-                               na.rm = TRUE)
-
-# Calculate narrative and science score
-## narrative items: q3, q5
-## science items: all remaining items
-df_Post101$p101_narrative_score = rowSums(df_Post101[, c("q3_wings_score", "q5_wait_score")], na.rm = TRUE)
-df_Post101$p101_science_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q4_goopy_score", 
-                                                "q6_line_score", "q7_out_score", "q8_jar_score", 
-                                                "q9_video_score", "q10_add_score", "q11_next_score")], na.rm = TRUE)
-
+# # Calculate recall and transfer score
+# ## recall items: q1, q2, q3, q4, q5, q6, q10
+# ## transfer items: q7, q8, q9, q11
+# df_Post101$p101_recall_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q3_wings_score", 
+#                                                 "q4_goopy_score", "q5_wait_score", "q6_line_score", "q10_add_score")],
+#                                na.rm = TRUE)
+# 
+# df_Post101$p101_transfer_score = rowSums(df_Post101[, c("q7_out_score", "q8_jar_score", "q9_video_score", "q11_next_score")], 
+#                                na.rm = TRUE)
+# 
+# # Calculate narrative and science score
+# ## narrative items: q3, q5
+# ## science items: all remaining items
+# df_Post101$p101_narrative_score = rowSums(df_Post101[, c("q3_wings_score", "q5_wait_score")], na.rm = TRUE)
+# df_Post101$p101_science_score = rowSums(df_Post101[, c("q1_drink_score", "q2_nectar_score", "q4_goopy_score", 
+#                                                 "q6_line_score", "q7_out_score", "q8_jar_score", 
+#                                                 "q9_video_score", "q10_add_score", "q11_next_score")], na.rm = TRUE)
+# 
 # Sanity check
 df_Post101$p101_total_score_check = df_Post101$p101_init_total_score + df_Post101$p101_rpt_total_score
 

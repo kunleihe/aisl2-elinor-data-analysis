@@ -1,5 +1,5 @@
 ---
-title: "Four-condition EWW data prep"
+title: "Data cleaning for tracker and baseline"
 author: "Kunlei He"
 date: "2024-02-17"
 output:
@@ -31,32 +31,14 @@ library(tidyr)
 # Raw data
 df_RawTracker = read.xlsx("raw_data/raw_tracker.xlsx")
 
+# missing age and ethnicity
+df_MissingAgeEthnicityFilled = read.csv("clean_data/missing_age_ethnicity_filled.csv")
+
+# Baseline
+## QUILS
 df_QuilsPt1 = read.csv("raw_data/raw_quils_pt1.csv")
 df_QuilsPt2 = read.csv("raw_data/raw_quils_pt2.csv")
 
-df_RawPost117 = read.csv("raw_data/raw_post_117.csv")
-df_RawPost109 = read.csv("raw_data/raw_post_109.csv")
-df_RawPost101 = read.csv("raw_data/raw_post_101.csv")
-
-
-df_RawDelayed117 = read.csv("raw_data/raw_delayed_post_117.csv")
-df_RawDelayed109 = read.csv("raw_data/raw_delayed_post_109.csv")
-
-# Manual Score
-df_P117Manual = read.csv("raw_data/p117_cr.csv")
-df_D117Manual = read.csv("raw_data/d117_cr.csv")
-
-df_P109Manual = read.csv("raw_data/p109_cr.csv")
-df_D109Manual = read.csv("raw_data/d109_cr.csv")
-
-# # Auto Scored data
-df_Post117 = read.csv("clean_data/post_117.csv")
-df_Delayed117 = read.csv("clean_data/delayed_117.csv")
-
-df_Post109 = read.csv("clean_data/post_109.csv")
-df_Delayed109 = read.csv("clean_data/delayed_109.csv")
-
-# Baseline
 ## MEFS
 df_MEFS = read.csv("raw_data/MEFS.csv")
 # df_MEFS = read.csv("clean_data/MEFS.csv")
@@ -70,24 +52,16 @@ df_ToM = read.csv("raw_data/ToM.csv")
 ## LENS
 df_LENS = read.csv("raw_data/LENS.csv")
 
-
-# Tracker without baseline
-df_Tracker = read.csv("clean_data/tracker.csv")
-
-# Tracker with baseline
-df_TrackerFull = read.csv("clean_data/tracker_full.csv")
-
-
-# Final score
-df_Post109Final = read.csv("clean_data/post_109_final.csv")
-df_Delayed109Final = read.csv("clean_data/delayed_109_final.csv")
-df_Post117Final = read.csv("clean_data/post_117_final.csv")
-df_Delayed117Final = read.csv("clean_data/delayed_117_final.csv")
-df_Post101Final = read.csv("clean_data/post_101_final.csv")
-
 # SWAN
 df_Swan_eng = read.csv("raw_data/swan_eng.csv")
 df_Swan_spa = read.csv("raw_data/swan_spa.csv")
+
+# Pretest
+df_Pretest = read.csv("raw_data/raw_pretest.csv")
+
+
+# Tracker without baseline
+df_Tracker = read.csv("clean_data/tracker.csv")
 ```
 
 # Clean data
@@ -131,7 +105,7 @@ dupRows <- df_Tracker %>%
 print(dupRows)
 ```
 
-### fix conditions
+### correct conditions
 ```{r}
 # For id = 3453, change condition117 to "human"
 df_Tracker$condition117[df_Tracker$id == "3453"] = "human"
@@ -151,9 +125,6 @@ df_Tracker$condition109[df_Tracker$id == "3260"] = "interactive"
 
 # For id = 3469, change condition101 to "no"
 df_Tracker$condition101[df_Tracker$id == "3469"] = "no"
-
-
-
 ```
 
 ### clean age and ethnicity
@@ -162,10 +133,6 @@ df_Tracker$condition101[df_Tracker$id == "3469"] = "no"
 # Ensure both dob and ep117_posttest_date are in Date format
 df_Tracker$dob = as.Date(df_Tracker$dob)
 df_Tracker$ep117_posttest_date = as.Date(df_Tracker$ep117_posttest_date)
-
-# Calculate age 
-df_Tracker$age = as.numeric(df_Tracker$ep117_posttest_date - df_Tracker$dob)/365.25
-df_Tracker$age <- round(df_Tracker$age, 2)
 
 # rearrange
 df_Tracker = df_Tracker %>% dplyr::select(id, age, gender, ethnicity, everything())
@@ -194,8 +161,40 @@ df_Tracker <- df_Tracker %>% select(-Gender)
 
 # lower case the column gender
 df_Tracker$gender = tolower(df_Tracker$gender)
-
 ```
+
+### fill missing gender, age and ethincity
+```{r}
+# turn dob into date
+df_MissingAgeEthnicityFilled$dob = as.Date(df_MissingAgeEthnicityFilled$dob, format="%m/%d/%y")
+
+df_Tracker$id <- as.numeric(df_Tracker$id)
+df_MissingAgeEthnicityFilled$id <- as.numeric(df_MissingAgeEthnicityFilled$id)
+
+
+df_Tracker <- df_Tracker %>%
+  left_join(df_MissingAgeEthnicityFilled %>% select(id, gender, dob, ethnicity), by = "id", suffix = c("", ".missing")) %>%
+  mutate(
+    dob = ifelse(is.na(dob), dob.missing, dob),
+    ethnicity = ifelse(is.na(ethnicity), ethnicity.missing, ethnicity),
+    gender = ifelse(is.na(gender), gender.missing, gender)
+  ) %>%
+  select(-dob.missing, -ethnicity.missing, -gender.missing)
+
+
+# calculate age 
+df_Tracker$age = as.numeric(df_Tracker$ep117_posttest_date - df_Tracker$dob)/365.25
+df_Tracker$age <- round(df_Tracker$age, 2)
+```
+
+
+### double check if missing values
+```{r}
+print(sum(is.na(df_Tracker$age)))
+print(sum(is.na(df_Tracker$gender)))
+print(sum(is.na(df_Tracker$ethnicity)))
+```
+
 
 ### Write cleaned tracker
 ```{r}
@@ -219,10 +218,21 @@ df_MEFS = df_MEFS %>%
 
 
 df_MEFSClean = df_MEFS %>% select(id, total_score)
-
-# write.csv(df_MEFSClean, "clean_data/MEFS.csv", row.names = FALSE)
 ```
 
+### Remove dup rows
+```{r}
+dupRows <- df_MEFS %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+print(dupRows)
+```
+
+
+```{r}
+# write.csv(df_MEFSClean, "clean_data/baseline/MEFS.csv", row.names = FALSE)
+```
 
 ## QUILS
 ### Remove dup rows
@@ -251,7 +261,7 @@ print(dupRows)
 ```
 
 ```{r}
-write.csv(df_QuilsClean, "clean_data/QUILS.csv", row.names = FALSE)
+# write.csv(df_QuilsClean, "clean_data/baseline/QUILS.csv", row.names = FALSE)
 ```
 
 
@@ -366,7 +376,7 @@ df_LENSClean = df_LENS %>%
 
 
 ```{r}
-write.csv(df_LENSClean, "clean_data/LENS.csv", row.names = FALSE)
+# write.csv(df_LENSClean, "clean_data/baseline/LENS.csv", row.names = FALSE)
 ```
 
 ## ToM
@@ -402,24 +412,36 @@ df_ToMClean$ToM_animal_score = df_ToMClean$q9_score + df_ToMClean$q10_score + df
 ```
 
 ```{r}
-write.csv(df_ToMClean, "clean_data/ToM.csv", row.names = FALSE)
+# write.csv(df_ToMClean, "clean_data/baseline/ToM.csv", row.names = FALSE)
 ```
 
-## MEFS
+## Pretest
 ### Remove dup rows
 ```{r}
-dupRows <- df_MEFS %>%
-  group_by(Child.ID) %>%
+dupRows <- df_Pretest %>%
+  group_by(id) %>%
   filter(n() > 1) %>%
   ungroup()
 print(dupRows)
 ```
 
-
 ```{r}
-df_MEFSClean = df_MEFS
-write.csv(df_MEFSClean, "clean_data/MEFS.csv", row.names = FALSE)
+# for dup ids in pretest, keep those with higher pretest_score
+df_PretestClean = df_Pretest %>% 
+  arrange(id, pretest_score) %>%
+  filter(!duplicated(id, fromLast = TRUE))
+
+# check dup rows again
+dupRows <- df_Pretest %>%
+  group_by(id) %>%
+  filter(n() > 1) %>%
+  ungroup()
+print(dupRows)
 ```
+```{r}
+# write.csv(df_PretestClean, "clean_data/baseline/pretest.csv", row.names = FALSE)
+```
+
 
 ## SWAN
 
@@ -549,47 +571,37 @@ df_SwanMapped = df_SwanMapped %>%
 write.csv(df_SwanMapped, "clean_data/swan_score_temp.csv", row.names = F) # only 102 kids, need further manual mapping by looking at names
 ```
 
-
-### Merge SWAN score with master
+## Merge baseline to tracker
+### Reload clean baseline data
 ```{r}
-# Wide form
-df_Master <- read.csv("clean_data/master_wide.csv") # read df_Maseter in case it is not loaded
+df_QuilsClean = read.csv("clean_data/baseline/QUILS.csv")
+df_MEFSClean = read.csv("clean_data/baseline/MEFS.csv")
+df_LENSClean = read.csv("clean_data/baseline/LENS.csv")
+df_ToMClean = read.csv("clean_data/baseline/ToM.csv")
+df_PretestClean = read.csv("clean_data/baseline/pretest.csv")
 
-# merge `swan_score` column in df_SwanMapped into df_Master by id
-df_Master = merge(df_Master, df_SwanMapped %>% dplyr::select(id, swan_score), by="id", all.x=T)
-
-# write df_Master
-write.csv(df_Master, "clean_data/master_wide.csv", row.names = FALSE)
-
-# Long form
-df_Master_Long <- read.csv("clean_data/master_long.csv") # read df_Master_Long in case it is not loaded
-df_SwanMapped <- read.csv("clean_data/swan_score_temp.csv")
-# merge `swan_score` column in df_SwanMapped into df_Master_Long by id
-df_Master_Long = merge(df_Master_Long, df_SwanMapped %>% dplyr::select(id, swan_score), by="id", all.x=T)
-
-write.csv(df_Master_Long, "clean_data/master_long.csv", row.names = FALSE)
+# Tracker without baseline
+df_Tracker = read.csv("clean_data/tracker.csv")
 ```
 
-
-## Merge baseline to tracker
 ### LENS
 ```{r}
 df_LENSClean = df_LENSClean %>% rename(id = Child.ID)
-df_TrackerFull = merge(df_Tracker, df_LENSClean, by=c("id"), all.x=T)
+df_TrackerWithBaseLine = merge(df_Tracker, df_LENSClean, by=c("id"), all.x=T)
 ```
 
 ### QUILS
 ```{r}
 df_QuilsClean = df_QuilsClean %>% rename(QUILS_score = total_score)
 df_QuilsClean = df_QuilsClean %>% select(id, QUILS_score)
-df_TrackerFull = merge(df_TrackerFull, df_QuilsClean, by=c("id"), all.x=T)
+df_TrackerWithBaseLine = merge(df_TrackerWithBaseLine, df_QuilsClean, by=c("id"), all.x=T)
 ```
 
 ### ToM
 ```{r}
 df_ToMClean = df_ToMClean %>% rename(ToM_total_score = total_score)
 df_ToMClean = df_ToMClean %>% select(id, ToM_tech_score, ToM_nature_score, ToM_animal_score, ToM_total_score)
-df_TrackerFull = merge(df_TrackerFull, df_ToMClean, by=c("id"), all.x=T)
+df_TrackerWithBaseLine = merge(df_TrackerWithBaseLine, df_ToMClean, by=c("id"), all.x=T)
 
 ```
 
@@ -598,21 +610,28 @@ df_TrackerFull = merge(df_TrackerFull, df_ToMClean, by=c("id"), all.x=T)
 df_MEFSClean = df_MEFSClean %>% rename(MEFS_score = Total.Score)
 df_MEFSClean = df_MEFSClean %>% rename(id = Child.ID)
 df_MEFSClean = df_MEFSClean %>% select(id, MEFS_score)
-df_TrackerFull = merge(df_TrackerFull, df_MEFSClean, by=c("id"), all.x=T)
+df_TrackerWithBaseLine = merge(df_TrackerWithBaseLine, df_MEFSClean, by=c("id"), all.x=T)
 ```
-### SWAN
-```{r}
-# read full tracker in case it isn't loaded
-df_TrackerFull = read.csv("clean_data/tracker.csv")
 
-# merge swan_score in df_Swan into df_TrackerFull by id
-df_TrackerFull = merge(df_TrackerFull, df_SwanMapped %>% dplyr::select(id, swan_score), by="id", all.x=T)
+### Pre-test
+```{r}
+df_PretestClean = df_PretestClean %>% select(id, pretest_score)
+df_TrackerWithBaseLine = merge(df_TrackerWithBaseLine, df_PretestClean, by=c("id"), all.x=T)
 ```
+
+<!-- ### SWAN -->
+<!-- ```{r} -->
+<!-- # read full tracker in case it isn't loaded -->
+<!-- df_TrackerFull = read.csv("clean_data/tracker.csv") -->
+
+<!-- # merge swan_score in df_Swan into df_TrackerFull by id -->
+<!-- df_TrackerFull = merge(df_TrackerFull, df_SwanMapped %>% dplyr::select(id, swan_score), by="id", all.x=T) -->
+<!-- ``` -->
 
 
 ### Check dup rows
 ```{r}
-dupRows <- df_TrackerFull %>%
+dupRows <- df_TrackerWithBaseLine %>%
   group_by(id) %>%
   filter(n() > 1) %>%
   ungroup()
@@ -623,7 +642,7 @@ print(dupRows)
 
 ### Write Full Tracker
 ```{r}
-write.csv(df_TrackerFull, "clean_data/tracker_full.csv", row.names = FALSE) 
+# write.csv(df_TrackerWithBaseLine, "clean_data/tracker_with_baseline.csv", row.names = FALSE) 
 ```
 
 ## Episode 101 post 

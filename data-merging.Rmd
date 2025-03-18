@@ -1,0 +1,271 @@
+---
+title: "data-merging"
+author: "Kunlei He"
+date: "2025-02-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+```
+
+# Load Library
+```{r}
+library(tidyr)
+library(dplyr)
+
+```
+
+# Load Data
+```{r}
+# tracker
+df_tracker <- read.csv("clean_data/tracker_with_baseline.csv")
+
+# immediate post-test for 109, 1117, 101
+df_post109 <- read.csv("clean_data/post_109_scored.csv")
+df_post117 <- read.csv("clean_data/post_117_scored.csv")
+df_post101 <- read.csv("clean_data/post_101_scored.csv")
+
+# delayed post-test
+df_delayed109 <- read.csv("clean_data/delayed_109_scored.csv")
+df_delayed117 <- read.csv("clean_data/delayed_117_scored.csv")
+```
+
+# Investigate Data
+- Note: the children in post or delayed post-test but not in the tracker were children before the pause caused by IRB. Therefore, we dropped those children. Final sample were the 120 children in the tracker.
+```{r}
+# Find the id in df_post109 that is not in df_tracker
+df_post109 %>% 
+  anti_join(df_tracker, by = "id") %>% 
+  select(id)
+
+# Find the id in df_post101 that is not in df_tracker, make it a list
+df_post101 %>% 
+  anti_join(df_tracker, by = "id") %>% 
+  select(id) %>% 
+  pull() 
+```
+# Compute z-scores
+```{r}
+# compute z-scores for each p109_total_score, p117_total_score, and p101_total_score, d109_total_score, and d117_total_score
+
+# z-score for post 109
+df_post109 <- df_post109 %>% 
+  mutate(
+    p109_total_score_z = (p109_total_score - mean(p109_total_score, na.rm = TRUE)) / sd(p109_total_score, na.rm = TRUE)
+  )
+
+df_post117 <- df_post117 %>% 
+  mutate(
+    p117_total_score_z = (p117_total_score - mean(p117_total_score, na.rm = TRUE)) / sd(p117_total_score, na.rm = TRUE)
+  )
+
+df_post101 <- df_post101 %>% 
+  mutate(
+    p101_total_score_z = (p101_total_score - mean(p101_total_score, na.rm = TRUE)) / sd(p101_total_score, na.rm = TRUE)
+  )
+
+df_delayed109 <- df_delayed109 %>% 
+  mutate(
+    d109_total_score_z = (d109_total_score - mean(d109_total_score, na.rm = TRUE)) / sd(d109_total_score, na.rm = TRUE)
+  )
+
+df_delayed117 <- df_delayed117 %>% 
+  mutate(
+    d117_total_score_z = (d117_total_score - mean(d117_total_score, na.rm = TRUE)) / sd(d117_total_score, na.rm = TRUE)
+  )
+```
+# Merge Data
+```{r}
+# rename data frames with session identifier
+# in df_post101, df_post109, and df_post117, add "p101", "p109", and "p117" to each column that starts with "q" and the "ra" and "start_date" column
+
+df_post101_renamed <- df_post101 %>% 
+  rename_with(~ paste0("p101_", .), starts_with("q")) %>% 
+  rename(p101_ra = ra) %>% 
+  rename(p101_start_date = start_date) %>% 
+  rename(p101_notes = notes)
+
+df_post109_renamed <- df_post109 %>% 
+  rename_with(~ paste0("p109_", .), starts_with("q")) %>% 
+  rename(p109_ra = ra) %>% 
+  rename(p109_start_date = start_date) %>% 
+  rename(p109_notes = notes)
+
+df_post117_renamed <- df_post117 %>% 
+  rename_with(~ paste0("p117_", .), starts_with("q")) %>% 
+  rename(p117_ra = ra) %>% 
+  rename(p117_start_date = start_date) %>% 
+  rename(p117_notes = notes)
+
+# in df_delayed109 and df_delayed117, add "d109" and "d117" to each column that starts with "q" and "ra" and "start_date" column
+df_delayed109_renamed <- df_delayed109 %>% 
+  rename_with(~ paste0("d109_", .), starts_with("q")) %>% 
+  rename(d109_ra = ra) %>% 
+  rename(d109_start_date = start_date) %>% 
+  rename(d109_notes = notes)
+
+df_delayed117_renamed <- df_delayed117 %>% 
+  rename_with(~ paste0("d117_", .), starts_with("q")) %>% 
+  rename(d117_ra = ra) %>% 
+  rename(d117_start_date = start_date) %>% 
+  rename(d117_notes = notes)
+```
+
+## Wide form
+```{r}
+# merge df_tracker, df_post109, df_post117, df_post101, df_delayed109, and df_delayed117 by id
+df_wide <- df_tracker %>% 
+  left_join(df_post109_renamed, by = "id") %>% 
+  left_join(df_post117_renamed, by = "id") %>% 
+  left_join(df_post101_renamed, by = "id") %>% 
+  left_join(df_delayed109_renamed, by = "id") %>% 
+  left_join(df_delayed117_renamed, by = "id")
+```
+
+## Long form
+```{r}
+colnames(df_wide)
+```
+### Post-test
+```{r}
+df_wide_selected_post <- df_wide %>%
+  # First, select columns that remain unchanged for each participant
+  select(id, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         # Select episode-specific columns with more precise matching
+         matches("^condition\\d+$"), 
+         matches("^ep\\d+_notes$"),
+         matches("^ep\\d+_posttest_date$"),
+         matches("^p\\d+_ra$"),
+         matches("^p\\d+_total_score$"),
+         matches("^p\\d+_total_score_z$")) %>% 
+  # Rename condition columns to have a consistent pattern with other columns
+  rename(
+    condition_117 = condition117,
+    condition_109 = condition109,
+    condition_101 = condition101,
+    notes_117 = ep117_notes,
+    notes_109 = ep109_notes,
+    notes_101 = ep101_notes,
+    date_117 = ep117_posttest_date,
+    date_109 = ep109_posttest_date,
+    date_101 = ep101_posttest_date,
+    ra_109 = p109_ra,
+    ra_117 = p117_ra,
+    ra_101 = p101_ra,
+    total_score_109 = p109_total_score,
+    total_score_117 = p117_total_score,
+    total_score_101 = p101_total_score,
+    total_score_z_109 = p109_total_score_z,
+    total_score_z_117 = p117_total_score_z,
+    total_score_z_101 = p101_total_score_z
+  )
+
+# Now transform to long format
+df_long_post <- df_wide_selected_post %>% 
+  # Pivot to long format
+  pivot_longer(
+    # Columns to pivot
+    cols = c(
+      starts_with("condition_"),
+      starts_with("notes_"),
+      starts_with("date_"),
+      starts_with("ra_"),
+      starts_with("total_score_") & !starts_with("total_score_z_"),
+      starts_with("total_score_z_")
+    ),
+    
+    # Extract episode number and variable type
+    names_to = c(".value", "episode"),
+    
+    # Pattern for matching: varname_episode
+    names_pattern = "(.+)_(\\d+)",
+    
+    # Don't include NA values
+    values_drop_na = FALSE
+  ) %>%
+  
+  # Rename the date column to posttest_date
+  rename(posttest_date = date) %>%
+  
+  # Select final columns in requested order
+  select(id, episode, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         condition, total_score, total_score_z, posttest_date, notes, ra)
+
+df_long_post$test_type = "post"
+
+# re-order columns
+df_long_post <- df_long_post %>% 
+  select(id, episode, condition, test_type, everything())
+```
+
+
+## Delayed post-test
+```{r}
+df_wide_selected_delayed <- df_wide %>%
+  # First, select columns that remain unchanged for each participant
+  select(id, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         # Select episode-specific columns with more precise matching
+         condition109, condition117, 
+         d109_ra, d117_ra,
+         d109_total_score, d109_total_score_z,
+         d117_total_score, d117_total_score_z)%>% 
+  # Rename condition columns to have a consistent pattern with other columns
+  rename(
+    condition_117 = condition117,
+    condition_109 = condition109,
+    ra_109 = d109_ra,
+    ra_117 = d117_ra,,
+    total_score_109 = d109_total_score,
+    total_score_117 = d117_total_score,
+    total_score_z_109 = d109_total_score_z,
+    total_score_z_117 = d117_total_score_z,
+  )
+
+# Now transform to long format
+df_long_delayed <- df_wide_selected_delayed %>% 
+  # Pivot to long format
+  pivot_longer(
+    # Columns to pivot
+    cols = c(
+      starts_with("condition_"),
+      starts_with("ra_"),
+      starts_with("total_score_") & !starts_with("total_score_z_"),
+      starts_with("total_score_z_")
+    ),
+    
+    # Extract episode number and variable type
+    names_to = c(".value", "episode"),
+    
+    # Pattern for matching: varname_episode
+    names_pattern = "(.+)_(\\d+)",
+    
+    # Don't include NA values
+    values_drop_na = FALSE
+  ) %>%
+  
+  # Select final columns in requested order
+  select(id, episode, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         condition, total_score, total_score_z, ra)
+
+df_long_delayed$test_type = "delayed"
+
+# re-order columns
+df_long_delayed <- df_long_delayed %>% 
+  select(id, episode, condition, test_type, everything())
+```
+
+
+
+# Write data
+```{r}
+write.csv(df_wide, "processed_data/full_data_wide.csv", row.names = FALSE)
+write.csv(df_long_post, "processed_data/full_data_long_post.csv", row.names = FALSE)
+write.csv(df_long_delayed, "processed_data/full_data_long_delayed.csv", row.names = FALSE)
+```
+

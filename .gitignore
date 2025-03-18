@@ -1,5 +1,11 @@
 raw_data/
 clean_data/
 supporting_materials/
+processed_data/
+figures/
+
+data-analysis-old.Rmd
 
 .DS_Store
+
+.Rhistory

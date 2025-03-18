@@ -1,0 +1,613 @@
+---
+title: "data-anlaysis"
+author: "Kunlei He"
+date: "2025-03-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+```
+
+# Load library
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lavaan)  # For FIML estimation
+library(lmtest)  # For robust standard errors
+library(sandwich)  # For clustered standard errors
+library(dplyr)
+library(emmeans)
+library(mice)
+library(miceadds)
+library(cobalt)
+library(MatchIt)
+library(lmerTest)
+```
+
+
+# Load data
+```{r}
+df_wide <- read.csv("processed_data/full_data_wide.csv")
+df_long_post <- read.csv("processed_data/full_data_long_post.csv")
+df_long_delayed <- read.csv("processed_data/full_data_long_delayed.csv")
+```
+
+# Resolve sample imbalance
+```{r}
+# check the unbalance before matching
+bal.tab(CA ~ age, data = df_wide)
+
+# Use propensity score matching
+df_wide$CA <- as.factor(df_wide$CA)
+
+# Perform propensity score matching
+# The formula specifies that 'CA' is the treatment and 'age' is the covariate
+# remove ids with missing MEFS
+psm_model <- matchit(CA ~ age, data = df_wide, method = "nearest", caliper = 0.3)
+
+# Create a matched data frame
+df_wide_balanced <- match.data(psm_model)
+
+# check balance after matching
+bal.tab(psm_model)
+
+# check age balance
+## get the mean, min, max for age by CA
+df_wide_balanced %>%
+  group_by(CA) %>%
+  summarise(mean_age = mean(age), min_age = min(age), max_age = max(age))
+
+model <- aov(age ~ CA, data = df_wide_balanced)
+summary(model)
+
+model <- aov(QUILS_score ~ CA, data = df_wide_balanced)
+summary(model)
+
+model <- aov(lens_score ~ CA, data = df_wide_balanced)
+summary(model)
+
+model <- aov(MEFS_score ~ CA, data = df_wide_balanced)
+summary(model)
+```
+
+```{r}
+# convert balanced wide data into long form
+df_wide_selected_post <- df_wide_balanced %>%
+  # First, select columns that remain unchanged for each participant
+  select(id, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         # Select episode-specific columns with more precise matching
+         matches("^condition\\d+$"), 
+         matches("^ep\\d+_notes$"),
+         matches("^ep\\d+_posttest_date$"),
+         matches("^p\\d+_ra$"),
+         matches("^p\\d+_total_score$"),
+         matches("^p\\d+_total_score_z$")) %>% 
+  # Rename condition columns to have a consistent pattern with other columns
+  rename(
+    condition_117 = condition117,
+    condition_109 = condition109,
+    condition_101 = condition101,
+    notes_117 = ep117_notes,
+    notes_109 = ep109_notes,
+    notes_101 = ep101_notes,
+    date_117 = ep117_posttest_date,
+    date_109 = ep109_posttest_date,
+    date_101 = ep101_posttest_date,
+    ra_109 = p109_ra,
+    ra_117 = p117_ra,
+    ra_101 = p101_ra,
+    total_score_109 = p109_total_score,
+    total_score_117 = p117_total_score,
+    total_score_101 = p101_total_score,
+    total_score_z_109 = p109_total_score_z,
+    total_score_z_117 = p117_total_score_z,
+    total_score_z_101 = p101_total_score_z
+  )
+
+# Now transform to long format
+df_long_post_matched <- df_wide_selected_post %>% 
+  # Pivot to long format
+  pivot_longer(
+    # Columns to pivot
+    cols = c(
+      starts_with("condition_"),
+      starts_with("notes_"),
+      starts_with("date_"),
+      starts_with("ra_"),
+      starts_with("total_score_") & !starts_with("total_score_z_"),
+      starts_with("total_score_z_")
+    ),
+    
+    # Extract episode number and variable type
+    names_to = c(".value", "episode"),
+    
+    # Pattern for matching: varname_episode
+    names_pattern = "(.+)_(\\d+)",
+    
+    # Don't include NA values
+    values_drop_na = FALSE
+  ) %>%
+  
+  # Rename the date column to posttest_date
+  rename(posttest_date = date) %>%
+  
+  # Select final columns in requested order
+  select(id, episode, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         condition, total_score, total_score_z, posttest_date, notes, ra)
+
+df_long_post_matched$test_type = "post"
+
+# re-order columns
+df_long_post_matched <- df_long_post_matched %>% 
+  select(id, episode, condition, test_type, everything())
+```
+
+```{r}
+df_wide_selected_delayed <- df_wide_balanced %>%
+  # First, select columns that remain unchanged for each participant
+  select(id, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         # Select episode-specific columns with more precise matching
+         condition109, condition117, 
+         d109_ra, d117_ra,
+         d109_total_score, d109_total_score_z,
+         d117_total_score, d117_total_score_z)%>% 
+  # Rename condition columns to have a consistent pattern with other columns
+  rename(
+    condition_117 = condition117,
+    condition_109 = condition109,
+    ra_109 = d109_ra,
+    ra_117 = d117_ra,,
+    total_score_109 = d109_total_score,
+    total_score_117 = d117_total_score,
+    total_score_z_109 = d109_total_score_z,
+    total_score_z_117 = d117_total_score_z,
+  )
+
+# Now transform to long format
+df_long_delayed_matched <- df_wide_selected_delayed %>% 
+  # Pivot to long format
+  pivot_longer(
+    # Columns to pivot
+    cols = c(
+      starts_with("condition_"),
+      starts_with("ra_"),
+      starts_with("total_score_") & !starts_with("total_score_z_"),
+      starts_with("total_score_z_")
+    ),
+    
+    # Extract episode number and variable type
+    names_to = c(".value", "episode"),
+    
+    # Pattern for matching: varname_episode
+    names_pattern = "(.+)_(\\d+)",
+    
+    # Don't include NA values
+    values_drop_na = FALSE
+  ) %>%
+  
+  # Select final columns in requested order
+  select(id, episode, age, gender, ethnicity, location, CA, lens_score, 
+         QUILS_score, ToM_total_score, MEFS_score, pretest_score,
+         condition, total_score, total_score_z, ra)
+
+df_long_delayed_matched$test_type = "delayed"
+
+# re-order columns
+df_long_delayed_matched <- df_long_delayed_matched %>% 
+  select(id, episode, condition, test_type, everything())
+```
+
+
+# Data processing
+### Immediate post-test
+```{r}
+# Factor variables
+## factor condition, set interactive as reference
+df_long_post$condition <- factor(df_long_post$condition, levels = c("interactive", "no", "semi", "human"))
+df_long_post_matched$condition <- factor(df_long_post_matched$condition, levels = c("interactive", "no", "semi", "human"))
+
+## factor episode, test_type, gender, ethnicity, location, CA
+df_long_post$episode <- factor(df_long_post$episode)
+df_long_post$test_type <- factor(df_long_post$test_type)
+df_long_post$gender <- factor(df_long_post$gender)
+df_long_post$ethnicity <- factor(df_long_post$ethnicity)
+df_long_post$location <- factor(df_long_post$location)
+df_long_post$CA <- factor(df_long_post$CA)
+```
+
+```{r}
+# Create dummy variables for condition
+df_long_post$no <- ifelse(df_long_post$condition == "no", 1, 0)
+df_long_post$semi <- ifelse(df_long_post$condition == "semi", 1, 0)
+df_long_post$human <- ifelse(df_long_post$condition == "human", 1, 0)
+df_long_post$interactive <- ifelse(df_long_post$condition == "interactive", 1, 0)
+
+# Create dummy variables for gender
+df_long_post$male <- ifelse(df_long_post$gender == "male", 1, 0)
+df_long_post$female <- ifelse(df_long_post$gender == "female", 1, 0)
+
+# Create dummy variables for ethnicity
+df_long_post$hispanic <- ifelse(df_long_post$ethnicity == "hispanic", 1, 0)
+df_long_post$not_hispanic <- ifelse(df_long_post$ethnicity == "notHispanic", 1, 0)
+```
+
+
+### Delayed post-test
+```{r}
+# Factor variables
+## factor condition, set interactive as reference
+df_long_delayed$condition <- factor(df_long_delayed$condition, levels = c("interactive", "no", "semi", "human"))
+df_long_delayed_matched$condition <- factor(df_long_delayed_matched$condition, levels = c("interactive", "no", "semi", "human"))
+```
+
+# Data anlaysis
+## Immediate post-test
+### Full sample, no controls
+```{r}
+model_full_no_control <- lmer(total_score_z ~ condition + (1|id), data = df_long_post)
+summary(model_full_no_control)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_full_no_control)
+summary(model_test)
+
+
+# get the number of unique id each condition
+df_long_post %>%
+  filter(!is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+emm_condition <- emmeans(model_full_no_control, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=66)","Human-\nInteractive\n(N=55)", "Pseudo-\ninteractive\n(N=53)", "Non-\nInteractive\n(N=57)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on immediate post-test scores \n(no covariates, full sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-immediate-full-no-controls.png", width = 7, height = 6, dpi = 300)
+```
+
+### Full sample, with controls
+```{r}
+model_full_with_controls <- lmer(total_score_z ~ condition + age + gender + ethnicity + lens_score + QUILS_score + MEFS_score + ToM_total_score + pretest_score + (1|id), data = df_long_post)
+summary(model_full_with_controls)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_full_with_controls)
+summary(model_test)
+
+
+# get the number of participant each group with no missing data in all the baseline measures
+df_long_post %>%
+  filter(!is.na(age) & !is.na(gender) & !is.na(ethnicity) & !is.na(lens_score) & !is.na(QUILS_score) & !is.na(MEFS_score) & !is.na(ToM_total_score) & !is.na(pretest_score) & !is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+
+# Get estimated marginal means for condition
+emm_condition <- emmeans(model_full_with_controls, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=60)","Human-\nInteractive\n(N=47)", "Pseudo-\ninteractive\n(N=44)", "Non-\nInteractive\n(N=48)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on immediate post-test scores \n(with covariates, full sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-immediate-full-with-controls.png", width = 7, height = 6, dpi = 300)
+```
+### Balanced sample, no controls
+```{r}
+model_balanced_no_controls <- lmer(total_score_z ~ condition + (1|id), data = df_long_post_matched)
+summary(model_balanced_no_controls)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_balanced_no_controls)
+summary(model_test)
+
+df_long_post_matched %>%
+  filter(!is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+emm_condition <- emmeans(model_balanced_no_controls, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=50)","Human-\nInteractive\n(N=45)", "Pseudo-\ninteractive\n(N=43)", "Non-\nInteractive\n(N=47)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on immediate post-test scores \n(no covariates, balanced sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-immediate-balanced-no-controls.png", width = 7, height = 6, dpi = 300)
+```
+### Balanced sample, with controls
+```{r}
+model_balanced_with_controls <- lmer(total_score_z ~ condition + age + gender + ethnicity + lens_score + QUILS_score + MEFS_score + ToM_total_score + pretest_score + (1|id), data = df_long_post_matched)
+summary(model_balanced_with_controls)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_balanced_with_controls)
+summary(model_test)
+
+df_long_post_matched %>%
+  filter(!is.na(age) & !is.na(gender) & !is.na(ethnicity) & !is.na(lens_score) & !is.na(QUILS_score) & !is.na(MEFS_score) & !is.na(ToM_total_score) & !is.na(pretest_score) & !is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+emm_condition <- emmeans(model_balanced_with_controls, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=44)","Human-\nInteractive\n(N=39)", "Pseudo-\ninteractive\n(N=36)", "Non-\nInteractive\n(N=40)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on immediate post-test scores \n(with covariates, balanced sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-immediate-balanced-with-controls.png", width = 7, height = 6, dpi = 300)
+```
+## Delayed post-test
+### Full sample, no controls
+```{r}
+model_full_no_control <- lmer(total_score_z ~ condition + (1|id), data = df_long_delayed)
+summary(model_full_no_control)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_full_no_control)
+summary(model_test)
+
+
+# get the number of unique id each condition
+df_long_delayed %>%
+  filter(!is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+emm_condition <- emmeans(model_full_no_control, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=66)","Human-\nInteractive\n(N=35)", "Pseudo-\ninteractive\n(N=31)", "Non-\nInteractive\n(N=43)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on delayed post-test scores \n(no covariates, full sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-delayed-full-no-controls.png", width = 7, height = 6, dpi = 300)
+```
+
+### Full sample, with controls
+```{r}
+model_full_with_controls <- lmer(total_score_z ~ condition + age + gender + ethnicity + lens_score + QUILS_score + MEFS_score + ToM_total_score + pretest_score + (1|id), data = df_long_delayed)
+summary(model_full_with_controls)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_full_with_controls)
+summary(model_test)
+
+
+# get the number of participant each group with no missing data in all the baseline measures
+df_long_delayed %>%
+  filter(!is.na(age) & !is.na(gender) & !is.na(ethnicity) & !is.na(lens_score) & !is.na(QUILS_score) & !is.na(MEFS_score) & !is.na(ToM_total_score) & !is.na(pretest_score) & !is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+
+# Get estimated marginal means for condition
+emm_condition <- emmeans(model_full_with_controls, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=60)","Human-\nInteractive\n(N=29)", "Pseudo-\ninteractive\n(N=28)", "Non-\nInteractive\n(N=36)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on delayed post-test scores \n(with covariates, full sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-delayed-full-with-controls.png", width = 7, height = 6, dpi = 300)
+```
+### Balanced sample, no controls
+```{r}
+model_balanced_no_controls <- lmer(total_score_z ~ condition + (1|id), data = df_long_delayed_matched)
+summary(model_balanced_no_controls)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_balanced_no_controls)
+summary(model_test)
+
+df_long_delayed_matched %>%
+  filter(!is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+emm_condition <- emmeans(model_balanced_no_controls, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=50)","Human-\nInteractive\n(N=28)", "Pseudo-\ninteractive\n(N=24)", "Non-\nInteractive\n(N=37)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on delayed post-test scores \n(no covariates, balanced sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-delayed-balanced-no-controls.png", width = 7, height = 6, dpi = 300)
+```
+### Balanced sample, with controls
+```{r}
+model_balanced_with_controls <- lmer(total_score_z ~ condition + age + gender + ethnicity + lens_score + QUILS_score + MEFS_score + ToM_total_score + pretest_score + (1|id), data = df_long_delayed_matched)
+summary(model_balanced_with_controls)
+
+# get the p-value for each of the coefficients
+model_test <- lmerTest::as_lmerModLmerTest(model_balanced_with_controls)
+summary(model_test)
+
+df_long_delayed_matched %>%
+  filter(!is.na(age) & !is.na(gender) & !is.na(ethnicity) & !is.na(lens_score) & !is.na(QUILS_score) & !is.na(MEFS_score) & !is.na(ToM_total_score) & !is.na(pretest_score) & !is.na(total_score_z)) %>%
+  group_by(condition) %>%
+  summarise(n = n_distinct(id))
+
+```
+
+```{r}
+# draw a plot of the mixed-effects model, x-axis is the condition, y-axis is the coefficients, and the error bar is the standard error, represent the coefficents using a point
+emm_condition <- emmeans(model_balanced_with_controls, ~ condition)
+emm_df <- as.data.frame(emm_condition)
+emm_df$condition <- factor(emm_df$condition, 
+                           levels = c("interactive", "human", "semi", "no"))
+
+
+ggplot(emm_df, aes(x = condition, y = emmean, color = condition)) +
+  geom_point(size = 5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, colour="#404040", alpha=0.8) +
+  scale_x_discrete(labels=c("CA-\nInteractive\n(N=44)","Human-\nInteractive\n(N=23)", "Pseudo-\ninteractive\n(N=22)", "Non-\nInteractive\n(N=32)")) +
+  scale_color_manual(name="Condition", values = c("#F97B22", "#7AA874","#6096B4", "gray")) +
+  labs(
+    title = "Predicted effects of condition on delayed post-test scores \n(with covariates, balanced sample)",
+    x = "",
+    y = "Predicted scores"
+  ) +
+  theme_classic() +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major.y = element_line()) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size=14, color="black"),
+        plot.title = element_text(hjust = 0.5))
+
+# save
+ggsave("figures/main-effect-delayed-balanced-with-controls.png", width = 7, height = 6, dpi = 300)
+```
+

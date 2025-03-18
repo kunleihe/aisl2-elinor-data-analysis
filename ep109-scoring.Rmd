@@ -7,6 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
 ```
 
 # Load Library
@@ -254,7 +255,7 @@ df_Delayed109 <- Func_q3_bird_score(df_Delayed109)
 
 ### q4_try_cr
 ```{r}
-## This item was a constructive item and manuall scored 
+## This item was a constructive item and was manually scored 
 ## merge the manual score to the data frame and rename it as q4_try_cr_score
 
 #########################
@@ -284,7 +285,7 @@ print(paste("In delayed post-test, the range of q4_try_cr_score is:",
 
 ### q5_fish
 ```{r}
-# q5_fish is the sum of q5_fish_init_score and q5b_fish_cr, which was manually scored
+# q5_fish is the sum of q5_fish_init_score (choice-based) and q5b_fish_cr (manually scored)
 ## q5_fish_init_score
 Func_q5_fish_score <- function(df) {
   df$q5_fish_init_score = ifelse(grepl("a", df$q5a_fish_init_choice, ignore.case = TRUE), 1,
@@ -295,7 +296,7 @@ Func_q5_fish_score <- function(df) {
 df_Post109 <- Func_q5_fish_score(df_Post109)
 df_Delayed109 <- Func_q5_fish_score(df_Delayed109)
 
-## q5_fish_cr_score, PAUSED HERE
+## q5_fish_cr_score
 #########################
 ## Immediate post-test###
 #########################
@@ -306,7 +307,7 @@ df_Post109 <- df_Post109 %>%
 
 df_Post109$q5_fish_score = df_Post109$q5_fish_init_score + df_Post109$q5_fish_cr_score
 
-print(paste("In immediate post-test, the range of q5b_fish_cr_score is:", 
+print(paste("In immediate post-test, the range of q5_fish_score is:", 
               min(df_Post109$q5_fish_score, na.rm = TRUE), "to", 
               max(df_Post109$q5_fish_score, na.rm = TRUE)))
 
@@ -320,15 +321,100 @@ df_Delayed109 <- df_Delayed109 %>%
 
 df_Delayed109$q5_fish_score = df_Delayed109$q5_fish_init_score + df_Delayed109$q5_fish_cr_score
 
-print(paste("In delayed post-test, the range of q5b_fish_cr_score is:", 
+print(paste("In delayed post-test, the range of q5_fish_score is:", 
               min(df_Delayed109$q5_fish_score, na.rm = TRUE), "to", 
               max(df_Delayed109$q5_fish_score, na.rm = TRUE)))
 
 ```
 
-### q6_shape PENDING
+### q6_shape
+```{r}
+# q6_shape is the sum of q6_shape_init_score (choice-based, correct answer A) and q6b_shape_cr (manually scored)
+## q6_shape_init_score
+Func_q6_shape_score <- function(df) {
+  df$q6_shape_init_score = ifelse(grepl("a", df$q6a_shape_init_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("a", df$q6a_shape_init_text, ignore.case = TRUE), 1, 0))
+  return (df)
+}
 
-### q7_skateboard PENDING
+df_Post109 <- Func_q6_shape_score(df_Post109)
+df_Delayed109 <- Func_q6_shape_score(df_Delayed109)
+
+## q6_shape_cr_score
+#########################
+## Immediate post-test###
+#########################
+df_Post109 <- df_Post109 %>%
+  left_join(df_Post109Manual[c("id", "p109_q6b_cr_score")], by = "id") %>%
+  mutate(q6_shape_cr_score = p109_q6b_cr_score) %>%
+  select(-p109_q6b_cr_score)
+
+df_Post109$q6_shape_score = df_Post109$q6_shape_init_score + df_Post109$q6_shape_cr_score
+
+print(paste("In immediate post-test, the range of q6_shape_score is:", 
+              min(df_Post109$q6_shape_score, na.rm = TRUE), "to", 
+              max(df_Post109$q6_shape_score, na.rm = TRUE)))
+
+########################
+## Delayed post-test###
+#######################
+df_Delayed109 <- df_Delayed109 %>%
+  left_join(df_Delayed109Manual[c("id", "d109_q6b_cr_score")], by = "id") %>%
+  mutate(q6_shape_cr_score = d109_q6b_cr_score) %>%
+  select(-d109_q6b_cr_score)
+
+df_Delayed109$q6_shape_score = df_Delayed109$q6_shape_init_score + df_Delayed109$q6_shape_cr_score
+
+print(paste("In delayed post-test, the range of q6_shape_score is:", 
+              min(df_Delayed109$q6_shape_score, na.rm = TRUE), "to", 
+              max(df_Delayed109$q6_shape_score, na.rm = TRUE)))
+
+```
+
+### q7_skateboard 
+```{r}
+# q7_skateboard is the sum of q7_skateboard_init_score (choice-based, correct answer C) and q7b_skateboard_cr (manually scored)
+## q7_skateboard_init_score
+Func_q7_skateboard_score <- function(df) {
+  df$q7_skateboard_init_score = ifelse(grepl("c", df$q7a_skateboard_init_choice, ignore.case = TRUE), 1,
+                                         ifelse(grepl("c", df$q7a_skateboard_init_text, ignore.case = TRUE), 1, 0))
+  return (df)
+}
+
+df_Post109 <- Func_q7_skateboard_score(df_Post109)
+df_Delayed109 <- Func_q7_skateboard_score(df_Delayed109)
+
+## q7_skateboard_cr_score
+#########################
+## Immediate post-test###
+#########################
+df_Post109 <- df_Post109 %>%
+  left_join(df_Post109Manual[c("id", "p109_q7b_cr_score")], by = "id") %>%
+  mutate(q7_skateboard_cr_score = p109_q7b_cr_score) %>%
+  select(-p109_q7b_cr_score)
+
+df_Post109$q7_skateboard_score = df_Post109$q7_skateboard_init_score + df_Post109$q7_skateboard_cr_score
+
+print(paste("In immediate post-test, the range of q7_skateboard_score is:", 
+              min(df_Post109$q7_skateboard_score, na.rm = TRUE), "to", 
+              max(df_Post109$q7_skateboard_score, na.rm = TRUE)))
+
+########################
+## Delayed post-test###
+#######################
+df_Delayed109 <- df_Delayed109 %>%
+  left_join(df_Delayed109Manual[c("id", "d109_q7b_cr_score")], by = "id") %>%
+  mutate(q7_skateboard_cr_score = d109_q7b_cr_score) %>%
+  select(-d109_q7b_cr_score)
+
+df_Delayed109$q7_skateboard_score = df_Delayed109$q7_skateboard_init_score + df_Delayed109$q7_skateboard_cr_score
+
+print(paste("In delayed post-test, the range of q7_skateboard_score is:", 
+              min(df_Delayed109$q7_skateboard_score, na.rm = TRUE), "to", 
+              max(df_Delayed109$q7_skateboard_score, na.rm = TRUE)))
+
+```
+
 
 ### q8_pointy
 ```{r}
@@ -385,7 +471,7 @@ df_Delayed109 <- Func_q9_boxy_score(df_Delayed109)
 
 ### q10_train_cr
 ```{r}
-## This item was a constructive item and manuall scored
+## This item was a constructive item and was manually scored
 #########################
 ## Immediate post-test###
 #########################
@@ -414,7 +500,7 @@ print(paste("In delayed post-test, the range of q10_train_cr_score is:",
 
 ### q11_plane_cr
 ```{r}
-## This item was a constructive item and manuall scored
+## This item was a constructive item and was manually scored
 #########################
 ## Immediate post-test###
 #########################
@@ -442,7 +528,7 @@ print(paste("In delayed post-test, the range of q11_plane_cr_score is:",
 
 ```
 
-## Aggregate scores PENDING
+## Aggregate scores
 - init_total_score: sum of all the initial responses
 - rpt_total_score: sum of all the reprompt responses
 - cr_total_score: sum of all the constructive responses
@@ -465,25 +551,34 @@ df_Post109$p109_cr_total_score = rowSums(df_Post109[, grepl("cr_score", colnames
 df_Post109$p109_rpt_total_score = rowSums(df_Post109[, grepl("rpt_score", colnames(df_Post109))], na.rm = TRUE)
 
 # Aggregate all item score to be total_score
-df_Post109$p109_total_score = rowSums(df_Post109[, c("q1_build_score", "q2_race_score", "q3_bird_score", 
-               "q4_try_cr_score", "q5_fish_score", "q6_shape_score", "q7_skateboard_score", "q8_pointy_score", 
+df_Post109$p109_total_score = rowSums(df_Post109[, c("q1_build_score", "q2_race_score", "q3_bird_score",
+               "q4_try_cr_score", "q5_fish_score", "q6_shape_score", "q7_skateboard_score", "q8_pointy_score",
                "q9_boxy_score", "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
 
-# Calculate recall and transfer score
-## recall items: q1, q2, q3, q4, q8, q9
-## transfer items: q5, q6, q7, q10, q11, 
-df_Post109$p109_recall_score = rowSums(df_Post109[, c("q1_build_score", "q2_race_score", "q3_bird_score", 
-                                                      "q4_try_cr_score", "q8_pointy_score", "q9_boxy_score")], na.rm = TRUE)
-df_Post109$p109_transfer_score = rowSums(df_Post109[, c("q5_fish_score", "q6_shape_score", "q7_skateboard_score", 
-                                                        "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
+# # Calculate recall and transfer score
+# ## recall items: q1, q2, q3, q4, q8, q9
+# ## transfer items: q5, q6, q7, q10, q11,
+# df_Post109$p109_recall_score = rowSums(df_Post109[, c("q1_build_score", "q2_race_score", "q3_bird_score",
+#                                                       "q4_try_cr_score", "q8_pointy_score", "q9_boxy_score")], na.rm = TRUE)
+# df_Post109$p109_transfer_score = rowSums(df_Post109[, c("q5_fish_score", "q6_shape_score", "q7_skateboard_score",
+#                                                         "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
+# 
+# # Calculate narrative and science score
+# ## narrative items: q1, q2, q4
+# ## science items: q3, q5, q6, q7, q8, q9, q10, q11
+# df_Post109$p109_narrative_score = rowSums(df_Post109[, c("q1_build_score", "q2_race_score", "q4_try_cr_score")], na.rm = TRUE)
+# df_Post109$p109_science_score = rowSums(df_Post109[, c("q3_bird_score", "q5_fish_score", "q6_shape_score",
+#                                                       "q7_skateboard_score", "q8_pointy_score", "q9_boxy_score",
+#                                                       "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
 
-# Calculate narrative and science score
-## narrative items: q1, q2, q4
-## science items: q3, q5, q6, q7, q8, q9, q10, q11
-df_Post109$p109_narrative_score = rowSums(df_Post109[, c("q1_build_score", "q2_race_score", "q4_try_cr_score")], na.rm = TRUE)
-df_Post109$p109_science_score = rowSums(df_Post109[, c("q3_bird_score", "q5_fish_score", "q6_shape_score", 
-                                                      "q7_skateboard_score", "q8_pointy_score", "q9_boxy_score", 
-                                                      "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
+# Sanity check
+df_Post109$p109_total_score_check = df_Post109$p109_init_total_score + df_Post109$p109_rpt_total_score + df_Post109$p109_cr_total_score
+
+## check if there are rows where total_score and total_score_check are different
+print(df_Post109 %>% filter(p109_total_score != p109_total_score_check))
+
+## remove total_score_check column
+df_Post109 <- df_Post109 %>% select(-p109_total_score_check)
 ```
 ### Delayed post-test
 2024-10-11 q6 and q7 are pending
@@ -498,23 +593,34 @@ df_Delayed109$d109_cr_total_score = rowSums(df_Delayed109[, grepl("cr_score", co
 df_Delayed109$d109_rpt_total_score = rowSums(df_Delayed109[, grepl("rpt_score", colnames(df_Delayed109))], na.rm = TRUE)
 
 # Aggregate all item score to be total_score
-df_Delayed109$d109_total_score = rowSums(df_Delayed109[, c("q1_build_score", "q2_race_score, q3_bird_score, q4_try_cr_score, q5_fish_score, q6_shape_score, q7_skateboard_score, q8_pointy_score, q9_boxy_score, q10_train_cr_score, q11_plane_cr_score")], na.rm = TRUE)
+df_Delayed109$d109_total_score = rowSums(df_Delayed109[, c("q1_build_score", "q2_race_score", "q3_bird_score",
+               "q4_try_cr_score", "q5_fish_score", "q6_shape_score", "q7_skateboard_score", "q8_pointy_score",
+               "q9_boxy_score", "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
 
-# Calculate recall and transfer score
-## recall items: q1, q2, q3, q4, q8, q9
-## transfer items: q5, q6, q7, q10, q11, 
-df_Delayed109$d109_recall_score = rowSums(df_Delayed109[, c("q1_build_score", "q2_race_score", "q3_bird_score", 
-                                                      "q4_try_cr_score", "q8_pointy_score", "q9_boxy_score")], na.rm = TRUE)
-df_Delayed109$d109_transfer_score = rowSums(df_Delayed109[, c("q5_fish_score", "q6_shape_score", "q7_skateboard_score", 
-                                                        "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
+# # Calculate recall and transfer score
+# ## recall items: q1, q2, q3, q4, q8, q9
+# ## transfer items: q5, q6, q7, q10, q11,
+# df_Delayed109$d109_recall_score = rowSums(df_Delayed109[, c("q1_build_score", "q2_race_score", "q3_bird_score",
+#                                                       "q4_try_cr_score", "q8_pointy_score", "q9_boxy_score")], na.rm = TRUE)
+# df_Delayed109$d109_transfer_score = rowSums(df_Delayed109[, c("q5_fish_score", "q6_shape_score", "q7_skateboard_score",
+#                                                         "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
+# 
+# # Calculate narrative and science score
+# ## narrative items: q1, q2, q4
+# ## science items: q3, q5, q6, q7, q8, q9, q10, q11
+# df_Delayed109$d109_narrative_score = rowSums(df_Delayed109[, c("q1_build_score", "q2_race_score", "q4_try_cr_score")], na.rm = TRUE)
+# df_Delayed109$d109_science_score = rowSums(df_Delayed109[, c("q3_bird_score", "q5_fish_score", "q6_shape_score",
+#                                                       "q7_skateboard_score", "q8_pointy_score", "q9_boxy_score",
+#                                                       "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
 
-# Calculate narrative and science score
-## narrative items: q1, q2, q4
-## science items: q3, q5, q6, q7, q8, q9, q10, q11
-df_Delayed109$d109_narrative_score = rowSums(df_Delayed109[, c("q1_build_score", "q2_race_score", "q4_try_cr_score")], na.rm = TRUE)
-df_Delayed109$d109_science_score = rowSums(df_Delayed109[, c("q3_bird_score", "q5_fish_score", "q6_shape_score", 
-                                                      "q7_skateboard_score", "q8_pointy_score", "q9_boxy_score", 
-                                                      "q10_train_cr_score", "q11_plane_cr_score")], na.rm = TRUE)
+# Sanity check
+df_Post109$p109_total_score_check = df_Post109$p109_init_total_score + df_Post109$p109_rpt_total_score + df_Post109$p109_cr_total_score
+
+## check if there are rows where total_score and total_score_check are different
+print(df_Post109 %>% filter(p109_total_score != p109_total_score_check))
+
+## remove total_score_check column
+df_Post109 <- df_Post109 %>% select(-p109_total_score_check)
 ```
 
 # Write to file
